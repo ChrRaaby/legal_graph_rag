@@ -1,6 +1,9 @@
 .cache/
+.cache_dk/
 .DS_Store
 .env
 __pycache__/
 .ipynb_checkpoints/
 json_out/
+danish_json_out/
+.venv/

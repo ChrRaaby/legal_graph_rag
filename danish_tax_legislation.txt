@@ -1,0 +1,30 @@
+# Danish tax legislation seed list
+# Format: year/number (ELI lta identifier)
+# Resolves to: https://www.retsinformation.dk/eli/lta/{year}/{number}/xml
+
+# Personskatteloven (PSL)
+2021/1284
+
+# Ligningsloven (LL)
+2023/42
+
+# Selskabsskatteloven (SEL)
+2022/1241
+
+# Kildeskatteloven (KSL)
+2024/460
+
+# Momsloven (ML) - merværdiafgiftsloven
+2024/209
+
+# Aktieavancebeskatningsloven (ABL)
+2021/172
+
+# Kursgevinstloven (KGL)
+2022/1390
+
+# Afskrivningsloven (AL)
+2021/242
+
+# Fondsbeskatningsloven (FBL)
+2021/700

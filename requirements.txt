@@ -1,0 +1,32 @@
+# Core
+jupyter
+jupyterlab
+notebook
+ipykernel
+beautifulsoup4
+python-dotenv
+pandas
+tqdm
+lxml
+# torch CPU — replace with torch with CUDA extras if you have a GPU
+torch --index-url https://download.pytorch.org/whl/cpu
+# Neo4j
+neo4j
+# pyspark pinned to match loader.ipynb
+pyspark==3.5.1
+# Browser automation (used by neo4j_analysis.py screenshot helper)
+playwright
+# Embeddings
+sentence-transformers
+# Graph viz
+neo4j-viz
+# LangChain ecosystem
+langchain
+langchain-neo4j
+langchain-google-genai
+langchain-openai
+langchain-huggingface
+langgraph
+# Streamlit app
+streamlit
+altair
