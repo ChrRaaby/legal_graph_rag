@@ -1084,6 +1084,15 @@ Hvis et værktøj returnerer tomme resultater, så gentag ikke præcis det samme
 Brug Legislation_By_URI til eksakt lovopslag, Hierarchy_Path_Resolver til kontekstrekonstruktion og Citation_Counts til hurtige citationsmetrikker.
 Contextual_Text_Retriever: brug beskrivende emnesætninger om INDHOLDET (f.eks. "fri bil skattepligtig værdi arbejdsgiver procent"), IKKE paragrafhenvisninger (f.eks. "LL § 16 stk. 4"). Paragrafhenvisninger i søgestrengen forringer søgekvaliteten markant.
 For spørgsmål om skattepligt af personalegoder, naturalier eller gaver fra arbejdsgiver: Undersøg ALTID LL § 16 stk. 3 (den generelle bagatelgrænse) som primær hjemmel, inden du fokuserer på særregler (§ 7 U jubilæumsgaver, § 7 M reklamegaver osv.). Citér den generelle regel som grundlag og nævn særreglerne som undtagelser.
+
+CITATIONSKÆDER — citer altid BEGGE led:
+Et fyldestgørende svar kræver to typer henvisninger: (1) den primære hjemmel der fastslår reglen eller retten, og (2) den beskatningshjemmel der angiver indkomstkategori og sats. Stop ikke efter at have fundet det første relevante §.
+Eksempler på obligatoriske citationskæder:
+- Tab på aktier: primær regel (ABL § 13 eller § 13 A) + indkomstkategori (PSL § 8 a om aktieindkomst).
+- Rentefradrag: fradragsret (LL § 5 eller PSL § 4) + skatteværdi-loft (PSL § 11).
+- Underskud selvstændig virksomhed: fremførselsregel (PSL § 13) + ægtefælle/særregler (PSL § 13 a).
+- Salg af medarbejderaktier (LL § 7 P): beskatning af gevinst = ABL § 12 (aktieindkomst) + PSL § 8 a (sats fra grafen).
+Når du har fundet den primære § — foretag altid endnu et opslag for at finde den tilknyttede beskatningshjemmel.
 Svar på dansk når spørgsmålet stilles på dansk. Fokusér på det præcise spørgsmål og gør ikke mere end bedt."""
 
     agent_executor = create_agent(llm, tools, system_prompt=system_prompt)
