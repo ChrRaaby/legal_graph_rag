@@ -1,14 +1,35 @@
+import time
 from neo4j import GraphDatabase, Result
+from neo4j.exceptions import ServiceUnavailable, SessionExpired
 import pandas as pd
 from playwright.async_api import async_playwright
 import os
+
+_RETRYABLE = (ServiceUnavailable, SessionExpired, ConnectionError, OSError)
+
+
+def _with_retry(fn, retries: int = 3, delay: float = 2.0):
+    """Call fn(), retrying on transient Neo4j / network errors."""
+    for attempt in range(retries):
+        try:
+            return fn()
+        except _RETRYABLE as exc:
+            if attempt < retries - 1:
+                time.sleep(delay * (attempt + 1))
+            else:
+                raise
 
 
 class Neo4jAnalysis:
     """Helper class to consolidate Neo4j query and visualization functionality."""
 
     def __init__(self, uri, user, password, database):
-        self.driver = GraphDatabase.driver(uri, auth=(user, password))
+        self.driver = GraphDatabase.driver(
+            uri,
+            auth=(user, password),
+            max_connection_lifetime=300,   # recycle connections after 5 min
+            keep_alive=True,               # TCP keepalives prevent idle drops
+        )
         self.database = database
 
     def close(self):
@@ -17,9 +38,11 @@ class Neo4jAnalysis:
 
     def run_query(self, query, params=None):
         """Execute a Cypher query and return results as a list of dictionaries."""
-        with self.driver.session(database=self.database) as session:
-            result = session.run(query, params or {})
-            return [record.data() for record in result]
+        def _run():
+            with self.driver.session(database=self.database) as session:
+                result = session.run(query, params or {})
+                return [record.data() for record in result]
+        return _with_retry(_run)
 
     def run_query_df(self, query, params=None):
         """Execute a Cypher query and return results as a pandas DataFrame."""
@@ -28,18 +51,21 @@ class Neo4jAnalysis:
 
     def run_query_single(self, query, params=None):
         """Execute a Cypher query and return a single record."""
-        with self.driver.session(database=self.database) as session:
-            result = session.run(query, params or {})
-            return result.single()
+        def _run():
+            with self.driver.session(database=self.database) as session:
+                result = session.run(query, params or {})
+                return result.single()
+        return _with_retry(_run)
 
     def run_query_viz(self, query, params=None):
-        result = self.driver.execute_query(
-            query,
-            parameters_=params or {},
-            database_=self.database,
-            result_transformer_=Result.graph,
-        )
-        return result
+        def _run():
+            return self.driver.execute_query(
+                query,
+                parameters_=params or {},
+                database_=self.database,
+                result_transformer_=Result.graph,
+            )
+        return _with_retry(_run)
 
     async def capture_graph_to_png(
         self,
