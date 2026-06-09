@@ -132,6 +132,21 @@ def _is_quota_error(exc: Exception) -> bool:
     return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg
 
 
+def _stream_with_retry(agent_executor, chat_messages, retries: int = 4) -> tuple:
+    """Call stream_agent_answer with exponential backoff on 429 quota errors."""
+    delay = 15.0
+    for attempt in range(retries):
+        try:
+            return stream_agent_answer(agent_executor, chat_messages)
+        except Exception as exc:
+            if _is_quota_error(exc) and attempt < retries - 1:
+                wait = delay * (2 ** attempt)
+                print(f"         [quota 429 — retrying in {wait:.0f}s]", flush=True)
+                time.sleep(wait)
+            else:
+                raise
+
+
 def _normalize(text: str) -> str:
     """Normalize text for must_contain matching to tolerate formatting variants.
 
@@ -546,11 +561,15 @@ def main() -> None:
         chat_messages = [{"role": "user", "content": question}]
         t0 = time.perf_counter()
         try:
-            answer, tool_events = stream_agent_answer(agent_executor, chat_messages)
+            answer, tool_events = _stream_with_retry(agent_executor, chat_messages)
         except Exception as exc:
             answer = f"[ERROR: {exc}]"
             tool_events = []
         latency = round(time.perf_counter() - t0, 3)
+
+        # Bubble up unrecoverable quota errors so the executor can abort
+        if "RESOURCE_EXHAUSTED" in answer or "429" in answer:
+            raise RuntimeError(f"LLM quota exhausted on item {item['id']}")
 
         scores = score_item(item, answer, tool_events)
         result: dict = {"item": item, "answer": answer, "latency_s": latency, "scores": scores}
@@ -591,10 +610,6 @@ def main() -> None:
                 lines.append(f"         citations missing: {missing_c}")
         with _print_lock:
             print("\n".join(lines) + "\n")
-
-        # Bubble up quota errors so the executor can abort
-        if "RESOURCE_EXHAUSTED" in answer or "429" in answer:
-            raise RuntimeError(f"LLM quota exhausted on item {item['id']}")
 
         return result
 
