@@ -10,3 +10,4 @@ danish_json_out/
 eval_log.jsonl
 eval_results.jsonl
 eval_compare_results.json
+observability.db

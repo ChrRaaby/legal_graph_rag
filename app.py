@@ -2,6 +2,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import time
 from difflib import SequenceMatcher
 
@@ -33,6 +34,103 @@ from neo4j_analysis import Neo4jAnalysis
 
 
 st.set_page_config(page_title="Legal Legislation Agent", layout="wide")
+
+# ---------------------------------------------------------------------------
+# Persistence — SQLite-backed traces and eval results
+# ---------------------------------------------------------------------------
+_DB_PATH = os.path.join(os.path.dirname(__file__), "observability.db")
+_TRACES_MAX = 50  # rows kept in traces table
+
+
+@st.cache_resource
+def _init_db() -> sqlite3.Connection:
+    con = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS traces (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          TEXT    NOT NULL DEFAULT (datetime('now')),
+            question    TEXT    NOT NULL,
+            answer      TEXT    NOT NULL,
+            latency_s   REAL,
+            tool_events TEXT,
+            provider    TEXT
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS eval_runs (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          TEXT    NOT NULL DEFAULT (datetime('now')),
+            item_id     TEXT    NOT NULL,
+            answer      TEXT    NOT NULL,
+            latency_s   REAL,
+            scores      TEXT,
+            tool_events TEXT,
+            provider    TEXT
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_eval_item ON eval_runs(item_id, ts)")
+    con.commit()
+    return con
+
+
+def _db_save_trace(con: sqlite3.Connection, question: str, answer: str,
+                   latency_s: float, tool_events: list, provider: str = "") -> None:
+    con.execute(
+        "INSERT INTO traces (question, answer, latency_s, tool_events, provider) VALUES (?,?,?,?,?)",
+        (question, answer, latency_s, json.dumps(tool_events, default=str), provider),
+    )
+    # Keep only the most recent _TRACES_MAX rows
+    con.execute(f"DELETE FROM traces WHERE id NOT IN (SELECT id FROM traces ORDER BY id DESC LIMIT {_TRACES_MAX})")
+    con.commit()
+
+
+def _db_save_eval_result(con: sqlite3.Connection, item_id: str, answer: str,
+                         latency_s: float, scores: dict, tool_events: list,
+                         provider: str = "") -> None:
+    con.execute(
+        "INSERT INTO eval_runs (item_id, answer, latency_s, scores, tool_events, provider) VALUES (?,?,?,?,?,?)",
+        (item_id, answer, latency_s, json.dumps(scores, default=str),
+         json.dumps(tool_events, default=str), provider),
+    )
+    con.commit()
+
+
+def _db_load_traces(con: sqlite3.Connection) -> list[dict]:
+    rows = con.execute(
+        "SELECT question, answer, latency_s, tool_events FROM traces ORDER BY id DESC LIMIT ?",
+        (_TRACES_MAX,),
+    ).fetchall()
+    result = []
+    for r in reversed(rows):
+        result.append({
+            "question": r["question"],
+            "answer": r["answer"],
+            "total_latency_s": r["latency_s"],
+            "tool_events": json.loads(r["tool_events"] or "[]"),
+        })
+    return result
+
+
+def _db_load_eval_results(con: sqlite3.Connection) -> dict:
+    """Return the latest result per item_id."""
+    rows = con.execute("""
+        SELECT er.item_id, er.answer, er.latency_s, er.scores, er.tool_events, er.ts
+        FROM eval_runs er
+        INNER JOIN (
+            SELECT item_id, MAX(id) AS max_id FROM eval_runs GROUP BY item_id
+        ) latest ON er.id = latest.max_id
+    """).fetchall()
+    out = {}
+    for r in rows:
+        out[r["item_id"]] = {
+            "answer": r["answer"],
+            "latency_s": r["latency_s"],
+            "scores": json.loads(r["scores"] or "{}"),
+            "tool_events": json.loads(r["tool_events"] or "[]"),
+        }
+    return out
+
 
 st.markdown(
     """
@@ -1209,6 +1307,11 @@ def _eval_run_case(item: dict, agent_executor) -> dict:
         "tool_events": tool_events,
     }
     st.session_state.eval_results[item["id"]] = result
+    _db_save_eval_result(
+        _db, item["id"], answer, latency,
+        result["scores"], tool_events,
+        provider=st.session_state.get("_selected_provider", ""),
+    )
     return result
 
 
@@ -1904,6 +2007,8 @@ with st.sidebar:
     else:
         selected_provider = None
 
+    st.session_state["_selected_provider"] = selected_provider or ""
+
     use_case_params = {"height": NETWORK_GRAPH_HEIGHT}
 
     if selected_use_case == "Legislation Graph":
@@ -2188,10 +2293,11 @@ _render_global_metrics(analysis)
 use_case_params["agent_tools"] = agent_tools
 _show_use_case_panel(analysis, selected_use_case, use_case_params, agent_executor=agent_executor)
 
+_db = _init_db()
 if "traces" not in st.session_state:
-    st.session_state.traces = []
+    st.session_state.traces = _db_load_traces(_db)
 if "eval_results" not in st.session_state:
-    st.session_state.eval_results = {}
+    st.session_state.eval_results = _db_load_eval_results(_db)
 
 if selected_use_case == "Chat Interface":
     if "messages" not in st.session_state:
@@ -2246,13 +2352,15 @@ if selected_use_case == "Chat Interface":
 
             log_trajectory(prompt, answer, tool_events, total_latency_s)
 
+            _db_save_trace(_db, prompt, answer, total_latency_s, tool_events,
+                           provider=selected_provider or "")
             st.session_state.traces.append({
                 "question": prompt,
                 "answer": answer,
                 "total_latency_s": total_latency_s,
                 "tool_events": tool_events,
             })
-            if len(st.session_state.traces) > 20:
+            if len(st.session_state.traces) > _TRACES_MAX:
                 st.session_state.traces.pop(0)
 
         st.session_state.messages.append(
