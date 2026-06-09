@@ -1966,6 +1966,179 @@ def _render_tools(tools: list) -> None:
                 st.markdown(f"**Python function** — `{fn.__name__}`")
 
 
+def _render_point_in_time(analysis: "Neo4jAnalysis") -> None:
+    st.subheader("Point in Time")
+    st.caption("Which version of each law was in force on a given date?")
+
+    cutoff = st.date_input("Select date", value=date.today(), key="pit_date")
+
+    query = """
+    MATCH (l:Legislation)
+    WHERE l.uri CONTAINS 'eli/lta'
+      AND l.coming_into_force IS NOT NULL
+      AND date(l.coming_into_force) <= date($cutoff)
+    WITH l.title AS title, max(date(l.coming_into_force)) AS latest_cif
+    MATCH (l2:Legislation)
+    WHERE l2.title = title AND date(l2.coming_into_force) = latest_cif
+    RETURN l2.title AS title,
+           l2.uri AS uri,
+           toString(l2.coming_into_force) AS in_force_from,
+           toString(l2.valid_date) AS valid_date,
+           l2.status AS status
+    ORDER BY l2.title
+    """
+    try:
+        rows = analysis.run_query(query, {"cutoff": str(cutoff)})
+    except Exception as exc:
+        st.error(f"Query failed: {exc}")
+        return
+
+    if not rows:
+        st.info("No legislation was in force on that date.")
+        return
+
+    # Abbreviation map for display
+    _ABBR = {
+        "ligningsloven": "LL",
+        "kildeskatteloven": "KSL",
+        "selskabsskatteloven": "SEL",
+        "personskatteloven": "PSL",
+        "aktiesparekontoloven": "ASKL",
+        "momsloven": "ML",
+        "afskrivningsloven": "AL",
+        "fondsbeskatningsloven": "FBL",
+        "aktieavancebeskatningsloven": "ABL",
+        "kursgevinstloven": "KGL",
+    }
+
+    def _abbr(title: str) -> str:
+        tl = title.lower()
+        for key, abbr in _ABBR.items():
+            if key in tl:
+                return abbr
+        return "—"
+
+    display = []
+    for r in rows:
+        short_uri = r["uri"].split("eli/lta/")[-1] if r["uri"] else r["uri"]
+        display.append({
+            "Abbreviation": _abbr(r["title"]),
+            "Version (ELI)": short_uri,
+            "In force from": r["in_force_from"],
+            "Valid date": r["valid_date"],
+            "Title": r["title"],
+        })
+
+    st.metric("Laws in force", len(display))
+    st.dataframe(display, use_container_width=True, hide_index=True)
+
+
+def _render_version_timeline(analysis: "Neo4jAnalysis") -> None:
+    st.subheader("Version Timeline")
+    st.caption("Timeline of all law versions in the graph, ordered by when each came into force.")
+
+    query = """
+    MATCH (l:Legislation)
+    WHERE l.uri CONTAINS 'eli/lta'
+      AND l.coming_into_force IS NOT NULL
+    RETURN l.title AS title,
+           l.uri AS uri,
+           toString(l.coming_into_force) AS cif,
+           toString(l.valid_date) AS valid_date
+    ORDER BY l.title, l.coming_into_force
+    """
+    try:
+        rows = analysis.run_query(query, {})
+    except Exception as exc:
+        st.error(f"Query failed: {exc}")
+        return
+
+    if not rows:
+        st.info("No data.")
+        return
+
+    _ABBR = {
+        "ligningsloven": "LL",
+        "kildeskatteloven": "KSL",
+        "selskabsskatteloven": "SEL",
+        "indkomstskat for personer": "PSL",
+        "aktiesparekontoloven": "ASKL",
+        "merværdiafgift": "ML",
+        "afskrivningsloven": "AL",
+        "fondsbeskatningsloven": "FBL",
+        "aktieavancebeskatningsloven": "ABL",
+        "kursgevinstloven": "KGL",
+        "ændring af personskatteloven": "LOV482",
+    }
+
+    def _abbr(title: str) -> str:
+        tl = title.lower()
+        for key, abbr in _ABBR.items():
+            if key in tl:
+                return abbr
+        return title[:20]
+
+    # Build swimlane data: for each version, bar goes from cif to next cif (or today)
+    from datetime import date as _date
+    import pandas as pd
+
+    # Group by title
+    by_title: dict = {}
+    for r in rows:
+        t = r["title"]
+        by_title.setdefault(t, []).append(r)
+
+    bar_rows = []
+    today_str = str(_date.today())
+    for title, versions in by_title.items():
+        abbr = _abbr(title)
+        for i, v in enumerate(versions):
+            end = versions[i + 1]["cif"] if i + 1 < len(versions) else today_str
+            short_uri = v["uri"].split("eli/lta/")[-1] if v["uri"] else ""
+            bar_rows.append({
+                "Law": abbr,
+                "Version": short_uri,
+                "Start": v["cif"],
+                "End": end,
+                "Tooltip": f"{abbr} {short_uri}  ({v['cif']} → {end})",
+            })
+
+    df = pd.DataFrame(bar_rows)
+    df["Start"] = pd.to_datetime(df["Start"])
+    df["End"] = pd.to_datetime(df["End"])
+
+    chart = (
+        alt.Chart(df)
+        .mark_bar(height=18, cornerRadiusEnd=3)
+        .encode(
+            x=alt.X("Start:T", title="Date"),
+            x2=alt.X2("End:T"),
+            y=alt.Y("Law:N", sort="-x", title=""),
+            color=alt.Color("Law:N", legend=None),
+            tooltip=["Law", "Version", "Start", "End"],
+        )
+        .properties(height=max(180, len(by_title) * 30))
+    )
+
+    # Vertical rule for today
+    today_rule = (
+        alt.Chart(pd.DataFrame([{"today": pd.Timestamp(today_str)}]))
+        .mark_rule(color="red", strokeDash=[4, 4], size=1.5)
+        .encode(x="today:T", tooltip=alt.value("Today"))
+    )
+
+    st.altair_chart((chart + today_rule).interactive(), use_container_width=True)
+
+    with st.expander("Raw data"):
+        st.dataframe(
+            df[["Law", "Version", "Start", "End"]].assign(
+                Start=df["Start"].dt.date, End=df["End"].dt.date
+            ),
+            use_container_width=True,
+            hide_index=True,
+        )
+
+
 st.title("Dansk Skattelovgivning — Graph Agent")
 st.caption("GraphRAG over dansk skattelovgivning fra retsinformation.dk.")
 
@@ -1979,6 +2152,8 @@ with st.sidebar:
             "Tools",
             "Request Trace",
             "Evaluation",
+            "Point in Time",
+            "Version Timeline",
             "The Complete Graph",
             "Legislation Graph",
             "Parts",
@@ -2112,6 +2287,10 @@ def _show_use_case_panel(
             "**Per-request waterfall timeline with LLM token counts, tool durations, and chain-of-thought reasoning.**",
         "Evaluation":
             "**Run golden-set test cases from the browser and inspect detailed pass/fail results.**",
+        "Point in Time":
+            "**Select a date and see which version of each law was in force on that date.**",
+        "Version Timeline":
+            "**Swimlane chart showing the full version history of all laws in the graph.**",
         "The Complete Graph":
             "**Visualize the full graph schema, including available node types and how they are connected.**",
         "Legislation Graph":
@@ -2124,7 +2303,8 @@ def _show_use_case_panel(
             "**Analyze legislation-to-legislation replacement relationships across supersedes and superseded-by links.**",
     }
 
-    if selected_use_case not in ("Architecture", "Request Trace", "Evaluation", "Tools"):
+    if selected_use_case not in ("Architecture", "Request Trace", "Evaluation", "Tools",
+                                 "Point in Time", "Version Timeline"):
         st.subheader(selected_use_case)
     st.caption(use_case_descriptions.get(selected_use_case, ""))
 
@@ -2145,6 +2325,14 @@ def _show_use_case_panel(
 
     if selected_use_case == "Evaluation":
         _render_evaluation(agent_executor)
+        return
+
+    if selected_use_case == "Point in Time":
+        _render_point_in_time(analysis)
+        return
+
+    if selected_use_case == "Version Timeline":
+        _render_version_timeline(analysis)
         return
 
     if selected_use_case == "The Complete Graph":
