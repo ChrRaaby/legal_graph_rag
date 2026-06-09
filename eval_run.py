@@ -9,6 +9,8 @@ Usage:
   python eval_run.py
   python eval_run.py --items 5
   python eval_run.py --item-ids gs-001,gs-007
+  python eval_run.py --llm gemini-flash --workers 5
+  python eval_run.py --failing-only
   python eval_run.py --judge --output eval_results_judged.jsonl
   python eval_run.py --golden-set my_set.json --no-log
 
@@ -29,10 +31,33 @@ import os
 import re
 import sys
 import time
+import threading
 from collections import defaultdict
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Optional
 from unittest.mock import MagicMock
+
+# ── Parse --llm before env/import so we can override env vars first ───────────
+def _parse_llm_arg() -> str:
+    """Quick pre-parse for --llm only, before full argparse and app import."""
+    for i, arg in enumerate(sys.argv[1:]):
+        if arg == "--llm" and i + 1 < len(sys.argv) - 1:
+            return sys.argv[i + 2]
+        if arg.startswith("--llm="):
+            return arg.split("=", 1)[1]
+    return "auto"
+
+_llm_override = _parse_llm_arg()
+if _llm_override == "gemini-flash":
+    os.environ.pop("OLLAMA_MODEL", None)
+    os.environ["LLM_PROVIDER"] = "gemini"
+elif _llm_override == "ollama":
+    os.environ["LLM_PROVIDER"] = "ollama"
+elif _llm_override == "openai":
+    os.environ.pop("OLLAMA_MODEL", None)
+    os.environ["LLM_PROVIDER"] = "openai"
+# "auto" → leave env as-is
 
 # ── Mock streamlit before importing app ──────────────────────────────────────
 _st = MagicMock()
@@ -432,6 +457,24 @@ def main() -> None:
         action="store_true",
         help="Skip appending trajectories to eval_log.jsonl",
     )
+    parser.add_argument(
+        "--llm",
+        default="auto",
+        choices=["auto", "gemini-flash", "ollama", "openai"],
+        help="LLM override: gemini-flash | ollama | openai | auto (uses env vars)",
+    )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Parallel workers (default 1). Use >1 with API-backed LLMs (gemini-flash, openai).",
+    )
+    parser.add_argument(
+        "--failing-only",
+        action="store_true",
+        help="Re-run only items that failed in the previous --output file",
+    )
     args = parser.parse_args()
 
     golden_path = Path(args.golden_set)
@@ -446,6 +489,25 @@ def main() -> None:
         items = [it for it in items if it["id"] in ids]
     if args.items is not None:
         items = items[: args.items]
+
+    # --failing-only: keep only items that failed in the previous output file
+    if args.failing_only:
+        output_path_prev = Path(args.output)
+        if not output_path_prev.is_absolute():
+            output_path_prev = Path(__file__).parent / args.output
+        if output_path_prev.exists():
+            passed_ids: set[str] = set()
+            for line in output_path_prev.read_text(encoding="utf-8").splitlines():
+                if not line.strip():
+                    continue
+                r = json.loads(line)
+                if r.get("scores", {}).get("overall_pass"):
+                    passed_ids.add(r["item"]["id"])
+            before = len(items)
+            items = [it for it in items if it["id"] not in passed_ids]
+            print(f"--failing-only: skipping {before - len(items)} passed item(s), re-running {len(items)}.\n")
+        else:
+            print("--failing-only: no previous output file found, running all items.\n")
 
     if not items:
         print("No items to run.")
@@ -471,75 +533,83 @@ def main() -> None:
     # Truncate output file at start of run (fresh run)
     output_path.write_text("", encoding="utf-8")
 
+    workers = max(1, args.workers)
     results: list[dict] = []
-    print(f"Running {len(items)} item(s)…\n")
+    _print_lock = threading.Lock()
+    _file_lock = threading.Lock()
+    total = len(items)
+    print(f"Running {total} item(s)  [workers={workers}  llm={_llm_override}]…\n")
 
-    for i, item in enumerate(items, 1):
+    def _run_item(indexed_item: tuple[int, dict]) -> dict:
+        i, item = indexed_item
         question = item["question"]
-        print(f"[{i:2d}/{len(items)}] {item['id']}  {question[:70]}")
-
         chat_messages = [{"role": "user", "content": question}]
         t0 = time.perf_counter()
         try:
             answer, tool_events = stream_agent_answer(agent_executor, chat_messages)
         except Exception as exc:
-            if _is_quota_error(exc):
-                print(f"\nAbort: LLM quota exhausted after {i-1} item(s). Check your plan/billing.")
-                sys.exit(1)
             answer = f"[ERROR: {exc}]"
             tool_events = []
         latency = round(time.perf_counter() - t0, 3)
 
-        # Quota errors surface inside the answer string when caught by stream_agent_answer
-        if "RESOURCE_EXHAUSTED" in answer or "429" in answer:
-            print(f"\nAbort: LLM quota exhausted after {i-1} item(s). Check your plan/billing.")
-            sys.exit(1)
-
         scores = score_item(item, answer, tool_events)
-
-        result: dict = {
-            "item": item,
-            "answer": answer,
-            "latency_s": latency,
-            "scores": scores,
-        }
+        result: dict = {"item": item, "answer": answer, "latency_s": latency, "scores": scores}
 
         if judge_llm is not None:
             result["judge_scores"] = llm_judge(item, answer, judge_llm)
 
-        results.append(result)
-
         if not args.no_log:
             log_trajectory(question, answer, tool_events, latency)
 
-        with open(output_path, "a", encoding="utf-8") as f:
-            f.write(json.dumps(result, ensure_ascii=False) + "\n")
+        with _file_lock:
+            with open(output_path, "a", encoding="utf-8") as f:
+                f.write(json.dumps(result, ensure_ascii=False) + "\n")
 
         status = "✓" if scores["overall_pass"] else "✗"
         judge_line = ""
-        if "judge_scores" in result and "judge_total" in result["judge_scores"]:
+        if "judge_scores" in result and "judge_total" in result.get("judge_scores", {}):
             judge_line = f"  judge={result['judge_scores']['judge_total']:.1f}/5"
-        print(
+        lines = [f"[{i:2d}/{total}] {item['id']}  {question[:70]}"]
+        lines.append(
             f"       {status}  latency={latency}s  "
-            f"tools={scores['tool_call_count']}  pass={scores['overall_pass']}"
-            f"{judge_line}"
+            f"tools={scores['tool_call_count']}  pass={scores['overall_pass']}{judge_line}"
         )
         if not scores["overall_pass"]:
             if not scores["must_contain_pass"]:
                 missing = [k for k, v in scores["must_contain_details"].items() if not v]
-                print(f"         must_contain missing: {missing}")
+                lines.append(f"         must_contain missing: {missing}")
             if not scores["must_not_contain_pass"]:
                 bad = [k for k, v in scores["must_not_contain_details"].items() if not v]
-                print(f"         must_not_contain present: {bad}")
+                lines.append(f"         must_not_contain present: {bad}")
             if not scores["behavior_match"]:
-                print(
+                lines.append(
                     f"         behavior: expected={scores['expected_behavior']} "
                     f"detected={scores['detected_behavior']}"
                 )
             if not scores["citation_pass"]:
                 missing_c = [c for c in scores["expected_legislation_check"] if not c["found"]]
-                print(f"         citations missing: {missing_c}")
-        print()
+                lines.append(f"         citations missing: {missing_c}")
+        with _print_lock:
+            print("\n".join(lines) + "\n")
+
+        # Bubble up quota errors so the executor can abort
+        if "RESOURCE_EXHAUSTED" in answer or "429" in answer:
+            raise RuntimeError(f"LLM quota exhausted on item {item['id']}")
+
+        return result
+
+    indexed = list(enumerate(items, 1))
+    with ThreadPoolExecutor(max_workers=workers) as pool:
+        futures = {pool.submit(_run_item, ix): ix for ix in indexed}
+        for future in as_completed(futures):
+            try:
+                results.append(future.result())
+            except RuntimeError as exc:
+                if "quota" in str(exc).lower():
+                    print(f"\nAbort: {exc}")
+                    pool.shutdown(wait=False, cancel_futures=True)
+                    sys.exit(1)
+                # Other errors already embedded in the result; non-fatal
 
     print_summary(results)
     print(f"Results written to: {output_path}")
