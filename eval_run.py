@@ -458,7 +458,7 @@ def main() -> None:
     print()
 
     print("Loading agent runtime…")
-    analysis, agent_executor = build_runtime()
+    analysis, agent_executor, _tools = build_runtime()
 
     judge_llm = None
     if args.judge:
