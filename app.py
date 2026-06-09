@@ -42,8 +42,13 @@ _DB_PATH = os.path.join(os.path.dirname(__file__), "observability.db")
 _TRACES_MAX = 50  # rows kept in traces table
 
 
-@st.cache_resource
+_db_connection: sqlite3.Connection | None = None
+
+
 def _init_db() -> sqlite3.Connection:
+    global _db_connection
+    if _db_connection is not None:
+        return _db_connection
     con = sqlite3.connect(_DB_PATH, check_same_thread=False)
     con.row_factory = sqlite3.Row
     con.execute("""
@@ -71,6 +76,7 @@ def _init_db() -> sqlite3.Connection:
     """)
     con.execute("CREATE INDEX IF NOT EXISTS idx_eval_item ON eval_runs(item_id, ts)")
     con.commit()
+    _db_connection = con
     return con
 
 
