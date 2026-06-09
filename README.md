@@ -1,59 +1,93 @@
-# A Graph Model of UK Legislation Text
+# Dansk Skattelovgivning — Graph Agent
 
-This repo is an example Neo4j use case designed to transform complex legislative data into an accessible, highly structured graph database describing relationships and temporal dynamics in [UK legal texts](https://www.legislation.gov.uk/).
+A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/), with a Streamlit front-end that exposes a LangGraph ReAct agent for natural-language querying of the graph.
 
-By leveraging a recursive [crawler](crawler.ipynb) and a parallel [data loader](loader.ipynb), this implementation processes structured legislative documents adhering to the [CLML Schema](https://github.com/legislation/clml-schema). It bypasses traditional, cumbersome ETL pipelines, manual data cleansing, and unreliable PDF scraping. Instead, it directly parses XML content provided by The National Archives, transforming legal content - spanning parts, chapters, sections, schedules, and explanatory notes - into a ready-to-use graph representation in Neo4j. This allows for complex temporal queries and deep legislative analysis. The underlying loader currently utilizes [pyspark](https://spark.apache.org/docs/latest/api/python/index.html) to optimize the transformation of raw JSON data for Neo4j, though the architecture is adaptable to standard Python environments depending on infrastructure requirements.
+The primary objective is **GraphRAG** (Graph Retrieval-Augmented Generation) applied to Danish tax law — making legislation machine-readable and conversationally queryable, with full traceability of sources.
 
-## Target State and Objective
+## Laws in the Graph
 
-Our primary objective is to cultivate a high-fidelity document knowledge graph, resulting in an optimal foundation for [GraphRAG](https://neo4j.com/blog/genai/what-is-graphrag/) (Graph Retrieval-Augmented Generation) applications specifically tailored for the legal and professional services sectors.
+| Abbreviation | Name | Versions |
+|---|---|---|
+| PSL | Personskatteloven | 2021/1284 |
+| LL | Ligningsloven | 2025/1500, 2023/42, 2021/1735, 2019/806 |
+| SEL | Selskabsskatteloven | 2022/1241, 2021/251 |
+| KSL | Kildeskatteloven | 2024/460, 2023/1330 |
+| ML | Momsloven | 2024/209 |
+| ABL | Aktieavancebeskatningsloven | 2021/172 |
+| KGL | Kursgevinstloven | 2022/1390 |
+| AL | Afskrivningsloven | 2021/242 |
+| FBL | Fondsbeskatningsloven | 2021/700 |
+| ASKL | Aktiesparekontoloven | 2025/281 |
+| — | LOV 482/2024 (PSL §§ 7/7a/8 reform) | 2024/482 |
+| — | PSL § 20 reguleringstabel 2025–2026 | — |
 
-## Use Cases in Legal and Professional Services
+## Architecture
 
-Firms operating within the legal and regulatory compliance sectors face escalating challenges when navigating complex, interconnected legislation. By structuring legislative texts as a knowledge graph, organizations can deploy GraphRAG capabilities to significantly accelerate legal research, ensuring practitioners can rapidly trace statutory references, cross-references, and amendments across decades of law.
+```
+User → Streamlit App
+           ↓
+    LangGraph ReAct Agent
+           ↓
+    13 StructuredTools (Python)
+           ↓
+    Neo4j Aura (graph DB)  +  Vector Index (intfloat/multilingual-e5-large, 1024 dims)
+           ↑
+    retsinformation.dk XML → danish_crawler.ipynb → loader.ipynb → vectorize_danish.py → indices.ipynb
+```
 
-Compliance teams can utilize this graph architecture to map complex regulatory obligations directly to internal corporate policies, automating risk assessments and proactively identifying potential compliance gaps. In mergers and acquisitions or audit scenarios, professional services firms can leverage the graph to perform exhaustive due diligence, instantly exposing relevant statutory liabilities or intersecting regulatory frameworks that traditional keyword searches typically overlook.
+### Graph Schema
 
-<p align="center">
-  <img src="renderings/point_in_time_legislation.png" alt="Point-in-Time Legislation"/>
-  <br>
-  <sub>An Act as of a Specific Point in Time</sub>
-</p>
+Core hierarchy: `Legislation → Part → Chapter → Section → Paragraph`
 
-## The Graph Schema
+Additional nodes: `Schedule`, `ScheduleParagraph`, `ExplanatoryNotes`, `Commentary`, `Citation`, `Text` (embedding carrier).
 
-The resulting graph schema is designed to capture the structural hierarchy of legislation as well as the nuanced relationships intrinsic to legal texts, including citations and commentaries.
+Key relationships: `HAS_PART`, `HAS_SECTION`, `HAS_PARAGRAPH`, `CITES`, `SUPERSEDES`, `SUPERSEDED_BY`, `LINKED_TO`.
 
-<p align="center">
-  <img src="renderings/schema_graph.png" alt="Graph Schema"/>
-  <br>
-  <sub>Graph Schema Representation</sub>
-</p>
+Temporal fields on nodes: `restrict_start_date`, `restrict_end_date` — enable point-in-time queries.
 
-## Time Stamps
+### Agent Tools (13)
 
-As many time related labels are captured by the crawler as possible, these timestamps are crucial for tracking the evolution of legislative documents and understanding the temporal context of legal provisions. These are then stored as properties at the node level (e.g., `restrict_start_date` and `restrict_end_date`).
+| Tool | Strategy | Purpose |
+|---|---|---|
+| `Legislation_Title_Resolver` | Lexical | Exact law title lookup |
+| `Legislation_Finder` | Hybrid (lexical + vector) | Primary law discovery |
+| `Contextual_Text_Retriever` | Vector | Evidence passages with full hierarchy context |
+| `Semantic_Search` | Vector | Free-form semantic search |
+| `Citation_Network_Explorer` | Graph | Citation edges between laws |
+| `Supersedes_Network_Explorer` | Graph | Outgoing replacement lineage |
+| `Superseded_By_Network_Explorer` | Graph | Incoming replacement lineage |
+| `Legislation_By_URI` | Graph | Exact URI lookup |
+| `Hierarchy_Path_Resolver` | Graph | Reconstruct node context |
+| `Citation_Counts` | Graph | Inbound/outbound citation metrics |
+| `Graph_Schema_Navigator` | Graph | Live schema via apoc.meta.data() |
+| `Read_Only_Cypher` | Cypher | Analyst-provided read-only queries |
+| `Text2Cypher_Expert` | Cypher | Last-resort NL-to-Cypher |
 
-<p align="center">
-  <img src="renderings/filtered_shortest_path.png" alt="Time-filtered Shortest Path"/>
-  <br>
-  <sub>Time-filtered Shortest Paths Between Acts</sub>
-</p>
+## Running the App
 
-A number of time-point queries are shows in the [examples](examples.ipynb) notebook, demonstrating how to leverage these timestamps to reconstruct the state of legislation at any given point in time, or to analyze the evolution of specific provisions across different legislative versions.
+```bash
+.venv/bin/streamlit run app.py
+```
 
-## Legislation Parser
+Requires `.env`:
+```
+NEO4J_URI=bolt://...
+NEO4J_USER=...
+NEO4J_PASSWORD=...
+GOOGLE_API_KEY=...    # or OPENAI_API_KEY / OLLAMA_MODEL
+```
 
-The [crawler](crawler.ipynb) systematically parses legislative hierarchies starting from a predetermined [seed list](legislation_list.txt). At the core of this model is the `Legislation` node, functioning as the root entity with detailed attributes such as the document URI, title, type, and enactment date. The structural integrity of the document is preserved through hierarchical nodes including `Part`, `Chapter`, `Section`, and `Paragraph`, each retaining specific numerical identifiers and textual content. 
+## Pipeline (build the graph from scratch)
 
-Additionally, the parser extracts supplementary materials, representing them as related `Schedule`, `ScheduleParagraph`, and `ExplanatoryNotes` nodes. The interconnected nature of legal frameworks is maintained by capturing external references as `Citation` nodes, alongside `Commentary` nodes that capture annotations linked back to specific provisions within the text.
+1. `danish_crawler.ipynb` — crawl retsinformation.dk from `danish_tax_legislation.txt`
+2. `loader.ipynb` — load JSON into Neo4j
+3. `python /tmp/vectorize_danish.py` — embed all `Text` nodes with `intfloat/multilingual-e5-large`
+4. `indices.ipynb` — create vector + text indexes
 
-<p align="center">
-  <img src="renderings/legislation_example_detail.png" alt="Part of Legislation Graph"/>
-  <br>
-  <sub>Detailed View of Legislation Graph</sub>
-</p>
+## Observability
 
-## Current Status and Future Enhancements
-
-There is still work to do to have a fully comprehensive and optimized legislative knowledge graph. In particular ordering isn't yet fully implemented across all node types, which is crucial for accurately reconstructing the chronological sequence of legal texts. Also, unapplied effects are not yet captured in the graph, and there are also various XML blocks which need to be extracted (e.g., `<InlineAmendment>` as well as `<Substitution>`, `<Addition>`, etc.). 
+The app includes built-in observability views accessible from the sidebar:
+- **Tools** — inspect all 13 agent tools: description, input schema, field types and constraints
+- **Request Trace** — per-request waterfall timeline with LLM token counts, tool durations, and chain-of-thought reasoning
+- **Evaluation** — run and inspect golden-set test cases (`eval_golden_set.json`, 30 cases)
+- **Architecture** — system overview, ReAct loop, and graph schema diagrams

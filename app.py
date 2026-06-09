@@ -1,8 +1,14 @@
 import json
+import logging
 import os
 import re
 import time
 from difflib import SequenceMatcher
+
+logging.getLogger("neo4j").setLevel(logging.ERROR)
+logging.getLogger("transformers").setLevel(logging.ERROR)
+logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
+os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 from typing import Any, Callable, Optional
 from datetime import date
 from collections import defaultdict, deque
@@ -46,6 +52,11 @@ NEO4J_PASSWORD = os.getenv("NEO4J_PASSWORD")
 NEO4J_DATABASE = os.getenv("NEO4J_DATABASE", "neo4j")
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
+OLLAMA_MODEL = os.getenv("OLLAMA_MODEL")
+OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://172.21.64.1:11434")
+LLM_PROVIDER = os.getenv("LLM_PROVIDER")   # ollama | gemini:<model> | openai | None (auto-detect)
+GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", GEMINI_MODEL).split(",") if m.strip()]
 AGENT_RETRIEVAL_K = int(os.getenv("AGENT_RETRIEVAL_K", 10))
 AGENT_HISTORY_MESSAGES = int(os.getenv("AGENT_HISTORY_MESSAGES", 20))
 DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
@@ -53,11 +64,22 @@ DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
 NETWORK_GRAPH_HEIGHT = 620
 
 @st.cache_resource(show_spinner=False)
-def build_runtime():
+def build_runtime(provider: str | None = None):
     if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
         raise RuntimeError("Missing Neo4j credentials. Set NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD.")
-    if not (GOOGLE_API_KEY or OPENAI_API_KEY):
-        raise RuntimeError("Set GOOGLE_API_KEY or OPENAI_API_KEY in your environment.")
+
+    # Resolve provider: argument → LLM_PROVIDER env var → auto-detect.
+    # Provider is "ollama", "openai", or "gemini:<model-name>" (e.g. "gemini:gemini-2.5-pro").
+    # Plain "gemini" (no suffix) uses GEMINI_MODEL. Guard against non-string values
+    # (e.g. MagicMock from headless eval context).
+    _known = {"ollama", "gemini", "openai"} | {f"gemini:{m}" for m in GEMINI_MODELS}
+    _provider = (provider if provider in _known else None) or LLM_PROVIDER or (
+        "ollama" if OLLAMA_MODEL else
+        f"gemini:{GEMINI_MODEL}" if GOOGLE_API_KEY else
+        "openai" if OPENAI_API_KEY else None
+    )
+    if not _provider:
+        raise RuntimeError("Set LLM_PROVIDER (or OLLAMA_MODEL / GOOGLE_API_KEY / OPENAI_API_KEY) in your environment.")
 
     analysis = Neo4jAnalysis(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE)
 
@@ -68,29 +90,35 @@ def build_runtime():
         database=NEO4J_DATABASE,
     )
 
-    llm = (
-        ChatGoogleGenerativeAI(
-            model="gemini-2.5-flash",
+    if _provider == "ollama":
+        if not OLLAMA_MODEL:
+            raise RuntimeError("LLM_PROVIDER=ollama but OLLAMA_MODEL is not set.")
+        from langchain_ollama import ChatOllama
+        llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
+    elif _provider.startswith("gemini"):
+        if not GOOGLE_API_KEY:
+            raise RuntimeError("LLM_PROVIDER=gemini but GOOGLE_API_KEY is not set.")
+        _gemini_model = _provider.split(":", 1)[1] if ":" in _provider else GEMINI_MODEL
+        llm = ChatGoogleGenerativeAI(
+            model=_gemini_model,
             temperature=0,
             api_key=GOOGLE_API_KEY,
             include_thoughts=True,
         )
-        if GOOGLE_API_KEY
-        else ChatOpenAI(
-            model="gpt-5-mini",
-            temperature=0,
-            api_key=OPENAI_API_KEY,
-        )
-    )
+    else:
+        if not OPENAI_API_KEY:
+            raise RuntimeError("LLM_PROVIDER=openai but OPENAI_API_KEY is not set.")
+        llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=OPENAI_API_KEY)
 
     embeddings = HuggingFaceEmbeddings(
-        model_name="nlpaueb/legal-bert-base-uncased",
+        model_name="intfloat/multilingual-e5-large",
+        cache_folder=os.path.join(os.path.dirname(__file__), "..", "models"),
         encode_kwargs={"normalize_embeddings": True},
     )
 
     cypher_prompt = PromptTemplate(
         input_variables=["schema", "question"],
-        template="""You are an expert Neo4j Cypher generator for a UK legislation graph.
+        template="""You are an expert Neo4j Cypher generator for a Danish tax legislation graph.
 Generate ONLY a valid read-only Cypher query.
 
 Graph schema:
@@ -102,7 +130,7 @@ Rules you MUST follow:
 3) When searching for titles, themes or topics, prefer the semantic search tool.
 4) Prefer exact property names above and valid relationship directions.
 5) When user names an Act/title, match with case-insensitive containment.
-6) When user references a known legislation.gov.uk id, filter by l.uri CONTAINS 'ukpga/2010/4' style.
+6) When user references a Danish ELI identifier, filter by l.uri CONTAINS 'eli/lta/2024/460' style.
 7) For network/visualization requests, return a path variable `p` (e.g., MATCH p=... RETURN p).
 8) For tabular requests, RETURN explicit aliased columns and use ORDER BY/LIMIT when reasonable.
 9) Avoid Cartesian products; always connect patterns.
@@ -110,7 +138,7 @@ Rules you MUST follow:
 11) Keep traversal bounded for path exploration (e.g., *1..6 or *1..10).
 12) CONTEXT IS MANDATORY for structural/text nodes. Include parent context up to Legislation.
 13) Do not return a bare content node alone unless explicitly requested.
-14) For relationship alternation, use ONE leading colon only, e.g. [:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_SCHEDULE*0..3]. Never write [:HAS_PART|:HAS_CHAPTER|...].
+14) For relationship alternation, use ONE leading colon only, e.g. [:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*0..3]. Never write [:HAS_PART|:HAS_CHAPTER|...].
 
 Question: {question}""",
     )
@@ -160,7 +188,7 @@ Question: {question}""",
         if cache_key in vector_hits_cache:
             return vector_hits_cache[cache_key]
 
-        embedding = embeddings.embed_query(query_text)
+        embedding = embeddings.embed_query(f"query: {query_text}")
         query = """
         CALL db.index.vector.queryNodes($index_name, $k, $embedding)
         YIELD node, score
@@ -220,9 +248,6 @@ Question: {question}""",
            OR any(tok IN $tokens WHERE tok <> '' AND (lt CONTAINS tok OR lu CONTAINS tok))
         RETURN l.title AS title,
                l.uri AS uri,
-               l.coming_into_force as coming_into_force,
-               l.modified_date as modified_date,
-               l.enactment_date AS enactment_date,
                l.status AS status,
                l.category AS category
         LIMIT $limit
@@ -282,10 +307,7 @@ Question: {question}""",
             ranked.append(candidate)
 
         ranked.sort(
-            key=lambda r: (
-                r.get("lexical_score", 0.0),
-                _sortable_date(r.get("enactment_date")),
-            ),
+            key=lambda r: r.get("lexical_score", 0.0),
             reverse=True,
         )
         return ranked[: int(limit)]
@@ -312,18 +334,15 @@ Question: {question}""",
         UNWIND $hits AS h
         MATCH (hit) WHERE elementId(hit) = h.node_id
         OPTIONAL MATCH (l_direct:Legislation) WHERE elementId(l_direct) = h.node_id
-        OPTIONAL MATCH (l_ctx:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH|HAS_SCHEDULE|HAS_SUBPARAGRAPH|HAS_EXPLANATORY_NOTES*1..6]->(hit)
+        OPTIONAL MATCH (l_ctx:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*1..6]->(hit)
         WITH h, coalesce(l_direct, l_ctx) AS l
         WHERE l IS NOT NULL
         RETURN l.title AS title,
                l.uri AS uri,
-               l.coming_into_force as coming_into_force,
-               l.modified_date as modified_date,
-               l.enactment_date AS enactment_date,
                l.status AS status,
                l.category AS category,
                max(h.score) AS vector_score
-        ORDER BY vector_score DESC, enactment_date DESC
+        ORDER BY vector_score DESC
         LIMIT $limit
         """
         return analysis.run_query(query, {"hits": hits, "limit": int(limit)})
@@ -385,10 +404,7 @@ Question: {question}""",
             out.append(enriched)
 
         out.sort(
-            key=lambda r: (
-                r.get("hybrid_score", 0.0),
-                _sortable_date(r.get("enactment_date")),
-            ),
+            key=lambda r: r.get("hybrid_score", 0.0),
             reverse=True,
         )
         return out[: int(limit)]
@@ -450,14 +466,53 @@ Question: {question}""",
         q = data.get("q", "")
         k = int(data.get("k", AGENT_RETRIEVAL_K))
         limit = int(data.get("limit", 15))
-        hits = _vector_hits(q, k=k)
-        if not hits:
+        if not q or not q.strip():
+            return []
+
+        # Direct § lookup: when the query names a specific section (e.g. "§ 16 stk 3"),
+        # vector search fills with Commentary cross-references and misses the target.
+        # Extract any § N (stk M) reference and run a direct Cypher lookup so the
+        # actual paragraph text is always included in the result set.
+        _direct_rows: list[dict] = []
+        _sec_match = re.search(
+            r'§\s*([\d]+(?:\s+(?!stk)[a-zA-ZÆØÅ](?!\w))?)(?:\s*,?\s*stk\.?\s*(\d+))?', q, re.IGNORECASE
+        )
+        if _sec_match:
+            _sec_num = _sec_match.group(1).strip()
+            _stk_num = _sec_match.group(2)
+            _direct_q = """
+            MATCH (sec:Section {number: $sec})<-[:HAS_SECTION]-(ch)<-[:HAS_CHAPTER|HAS_PART*0..3]-(leg:Legislation)
+            OPTIONAL MATCH (sec)-[:HAS_PARAGRAPH]->(par:Paragraph)
+            WHERE $stk IS NULL OR par.number = $stk
+            WITH leg, sec, par
+            WHERE leg IS NOT NULL
+            RETURN DISTINCT leg.title AS legislation_title,
+                   leg.uri AS legislation_uri,
+                   leg.status AS legislation_status,
+                   null AS part_number, null AS part_title,
+                   null AS chapter_number, null AS chapter_title,
+                   sec.number AS section_number, sec.title AS section_title,
+                   par.number AS paragraph_number,
+                   coalesce(par.text, sec.text, sec.title) AS matched_text,
+                   1.0 AS vector_score
+            ORDER BY par.number
+            LIMIT 5
+            """
+            _direct_rows = analysis.run_query(_direct_q, {"sec": _sec_num, "stk": _stk_num})
+
+        # Fetch 4× candidates: Commentary nodes dominate the top hits for any query
+        # mentioning § numbers (they score high because they explicitly cite § refs).
+        # Fetching 4× and filtering them exposes the actual Paragraph content below.
+        hits = _vector_hits(q, k=min(k * 4, 100))
+        if not hits and not _direct_rows:
             return []
 
         query = """
         UNWIND $hits AS h
         MATCH (n) WHERE elementId(n) = h.node_id
-        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH|HAS_SCHEDULE|HAS_SUBPARAGRAPH|HAS_EXPLANATORY_NOTES*0..6]->(n)
+        AND NOT 'Commentary' IN labels(n)
+        AND size(coalesce(n.text, n.description, '')) > 50
+        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*0..6]->(n)
         WITH h, n, l, p,
              head([x IN nodes(p) WHERE x:Part]) AS part,
              head([x IN nodes(p) WHERE x:Chapter]) AS chapter,
@@ -466,38 +521,64 @@ Question: {question}""",
         WHERE l IS NOT NULL
         RETURN DISTINCT l.title AS legislation_title,
                l.uri AS legislation_uri,
-               l.status as legislation_status,
-               l.coming_into_force as legislation_coming_into_force,
-               l.modified_date as legislation_modified_date,
+               l.status AS legislation_status,
                part.number AS part_number,
                part.title AS part_title,
-               part.restrict_start_date AS part_restrict_start_date,
-               part.restrict_end_date AS part_restrict_end_date,
-               part.restrict_extent AS part_restrict_extent,
-               part.status AS part_status,
                chapter.number AS chapter_number,
                chapter.title AS chapter_title,
-               chapter.restrict_start_date AS chapter_restrict_start_date,
-               chapter.restrict_end_date AS chapter_restrict_end_date,
-               chapter.restrict_extent AS chapter_restrict_extent,
-               chapter.status AS chapter_status,
                section.number AS section_number,
                section.title AS section_title,
-               section.restrict_start_date AS section_restrict_start_date,
-               section.restrict_end_date AS section_restrict_end_date,
-               section.restrict_extent AS section_restrict_extent,
-               section.status AS section_status,
                paragraph.number AS paragraph_number,
-               paragraph.restrict_start_date AS paragraph_restrict_start_date,
-               paragraph.restrict_end_date AS paragraph_restrict_end_date,
-               paragraph.restrict_extent AS paragraph_restrict_extent,
-               paragraph.status AS paragraph_status,
                coalesce(paragraph.text, n.text, n.title, n.description) AS matched_text,
                h.score AS vector_score
         ORDER BY vector_score DESC
         LIMIT $limit
         """
-        return analysis.run_query(query, {"hits": hits, "limit": limit})
+        rows = analysis.run_query(query, {"hits": hits, "limit": limit})
+
+        # Prepend direct § lookup rows (dedup by section+paragraph number so
+        # they don't duplicate vector hits that happened to surface the same node).
+        if _direct_rows:
+            existing = {(r.get("section_number"), r.get("paragraph_number")) for r in rows}
+            rows = [r for r in _direct_rows if (r.get("section_number"), r.get("paragraph_number")) not in existing] + rows
+
+        # For long texts with year-specific rate schedules (e.g. LL § 16 stk. 4),
+        # restructure into year-labelled sections so the model can locate the
+        # correct rate without reading 6000+ chars linearly.
+        # Only trigger when years appear as temporal rate-change qualifiers
+        # ("I indkomståret 20XX", "Fra og med 20XX") — NOT for base-year
+        # annotations like "(2010-niveau)" which must stay with their amounts.
+        _temporal_pattern = re.compile(
+            r'\b(?:I indkomståret|Fra og med|Fra den)\s+20\d{2}\b', re.IGNORECASE
+        )
+        for row in rows:
+            txt = row.get("matched_text") or ""
+            if len(txt) <= 1000:
+                continue
+            if not _temporal_pattern.search(txt):
+                continue  # no rate-change ladder — keep text intact
+            # Sentence-split on period+space only when followed by an uppercase
+            # letter (avoids splitting on abbreviations like m.v., stk., pkt.)
+            sentences = re.split(r'(?<=[.!?])\s+(?=[A-ZÆØÅ0-9])', txt)
+            by_year: dict[str, list[str]] = {}
+            no_year: list[str] = []
+            for s in sentences:
+                years = re.findall(r'\bI indkomståret (20\d{2})\b|\bFra (?:og med|den) (?:\S+ )*?(20\d{2})\b', s, re.IGNORECASE)
+                yr_set = [y for pair in years for y in pair if y]
+                if yr_set:
+                    for yr in dict.fromkeys(yr_set):
+                        by_year.setdefault(yr, []).append(s.strip())
+                else:
+                    no_year.append(s.strip())
+            if by_year:
+                parts = []
+                if no_year:
+                    parts.append("[Generelt:] " + " ".join(no_year[:3]))
+                for yr in sorted(by_year):
+                    parts.append(f"[{yr}:] " + " ".join(by_year[yr]))
+                row["matched_text"] = "\n".join(parts)
+
+        return rows
 
     class ContextualTextRetrieverInput(BaseModel):
         q: str = Field(..., description="Natural language legal query.")
@@ -520,7 +601,7 @@ Question: {question}""",
         UNWIND $hits AS h
         MATCH (hit) WHERE elementId(hit) = h.node_id
         OPTIONAL MATCH (source_direct:Legislation) WHERE elementId(source_direct) = h.node_id
-        OPTIONAL MATCH (source_ctx:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH|HAS_SCHEDULE|HAS_SUBPARAGRAPH|HAS_EXPLANATORY_NOTES*1..6]->(hit)
+        OPTIONAL MATCH (source_ctx:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*1..6]->(hit)
         WITH h, coalesce(source_direct, source_ctx) AS source
         WHERE source IS NOT NULL
         OPTIONAL MATCH (source)-[r:CITES]->(target:Legislation)
@@ -585,12 +666,9 @@ Question: {question}""",
         WHERE l.uri = $uri OR l.uri CONTAINS $uri
         RETURN l.title AS title,
                l.uri AS uri,
-               l.enactment_date AS enactment_date,
                l.category AS category,
-               l.status as status,
-               l.coming_into_force as coming_into_force,
-               l.modified_date as modified_date
-        ORDER BY l.enactment_date DESC
+               l.status AS status
+        ORDER BY l.uri DESC
         LIMIT 5
         """
         return analysis.run_query(query, {"uri": uri})
@@ -606,7 +684,7 @@ Question: {question}""",
         query_by_node = """
         MATCH (n)
         WHERE elementId(n) = $node_id
-        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH|HAS_SCHEDULE|HAS_SUBPARAGRAPH|HAS_EXPLANATORY_NOTES*0..6]->(n)
+        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*0..6]->(n)
         WITH n, l, p,
              head([x IN nodes(p) WHERE x:Part]) AS part,
              head([x IN nodes(p) WHERE x:Chapter]) AS chapter,
@@ -616,39 +694,21 @@ Question: {question}""",
                coalesce(n.uri, n.id, elementId(n)) AS node_ref,
                l.title AS legislation_title,
                l.uri AS legislation_uri,
-               l.status as legislation_status,
-               l.coming_into_force as legislation_coming_into_force,
-               l.modified_date as legislation_modified_date,
+               l.status AS legislation_status,
                part.number AS part_number,
                part.title AS part_title,
-               part.restrict_start_date AS part_restrict_start_date,
-               part.restrict_end_date AS part_restrict_end_date,
-               part.restrict_extent AS part_restrict_extent,
-               part.status AS part_status,
                chapter.number AS chapter_number,
                chapter.title AS chapter_title,
-               chapter.restrict_start_date AS chapter_restrict_start_date,
-               chapter.restrict_end_date AS chapter_restrict_end_date,
-               chapter.restrict_extent AS chapter_restrict_extent,
-               chapter.status AS chapter_status,
                section.number AS section_number,
                section.title AS section_title,
-               section.restrict_start_date AS section_restrict_start_date,
-               section.restrict_end_date AS section_restrict_end_date,
-               section.restrict_extent AS section_restrict_extent,
-               section.status AS section_status,
-               paragraph.number AS paragraph_number,
-               paragraph.restrict_start_date AS paragraph_restrict_start_date,
-               paragraph.restrict_end_date AS paragraph_restrict_end_date,
-               paragraph.restrict_extent AS paragraph_restrict_extent,
-               paragraph.status AS paragraph_status
+               paragraph.number AS paragraph_number
         LIMIT 10
         """
 
         query_by_uri = """
         MATCH (n)
         WHERE n.uri = $uri OR n.uri CONTAINS $uri
-        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH|HAS_SCHEDULE|HAS_SUBPARAGRAPH|HAS_EXPLANATORY_NOTES*0..6]->(n)
+        OPTIONAL MATCH p=(l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*0..6]->(n)
         WITH n, l, p,
              head([x IN nodes(p) WHERE x:Part]) AS part,
              head([x IN nodes(p) WHERE x:Chapter]) AS chapter,
@@ -658,32 +718,14 @@ Question: {question}""",
                coalesce(n.uri, n.id, elementId(n)) AS node_ref,
                l.title AS legislation_title,
                l.uri AS legislation_uri,
-               l.status as legislation_status,
-               l.coming_into_force as legislation_coming_into_force,
-               l.modified_date as legislation_modified_date,
+               l.status AS legislation_status,
                part.number AS part_number,
                part.title AS part_title,
-               part.restrict_start_date AS part_restrict_start_date,
-               part.restrict_end_date AS part_restrict_end_date,
-               part.restrict_extent AS part_restrict_extent,
-               part.status AS part_status,
                chapter.number AS chapter_number,
                chapter.title AS chapter_title,
-               chapter.restrict_start_date AS chapter_restrict_start_date,
-               chapter.restrict_end_date AS chapter_restrict_end_date,
-               chapter.restrict_extent AS chapter_restrict_extent,
-               chapter.status AS chapter_status,
                section.number AS section_number,
                section.title AS section_title,
-               section.restrict_start_date AS section_restrict_start_date,
-               section.restrict_end_date AS section_restrict_end_date,
-               section.restrict_extent AS section_restrict_extent,
-               section.status AS section_status,
-               paragraph.number AS paragraph_number,
-               paragraph.restrict_start_date AS paragraph_restrict_start_date,
-               paragraph.restrict_end_date AS paragraph_restrict_end_date,
-               paragraph.restrict_extent AS paragraph_restrict_extent,
-               paragraph.status AS paragraph_status
+               paragraph.number AS paragraph_number
         LIMIT 10
         """
 
@@ -729,7 +771,7 @@ Question: {question}""",
         return find_legislation(json.dumps({"q": q, "k": k, "limit": limit}))
 
     class LegislationTitleResolverInput(BaseModel):
-        q: str = Field(..., description="Legislation title-style query (e.g., Corporation Tax Act 2010).")
+        q: str = Field(..., description="Legislation title-style query (e.g., Personskatteloven, Ligningsloven).")
         limit: int = Field(default=10, ge=1, le=50, description="Max rows to return.")
 
     def resolve_legislation_title_structured(q: str, limit: int = 10):
@@ -802,13 +844,13 @@ Question: {question}""",
         name="Legislation_Title_Resolver",
         func=resolve_legislation_title_structured,
         args_schema=LegislationTitleResolverInput,
-        description="High-precision resolver for explicit Act-title queries (for example 'Corporation Tax Act 2010'). Use before semantic tools when user intent is a specific named Act. Returns ranked title/URI matches with lexical score.",
+        description="High-precision resolver for explicit law-title queries (for example 'Personskatteloven', 'Ligningsloven'). Use before semantic tools when user intent is a specific named law. Returns ranked title/URI matches with lexical score.",
     )
     text_context_tool = StructuredTool.from_function(
         name="Contextual_Text_Retriever",
         func=retrieve_text_with_context_structured,
         args_schema=ContextualTextRetrieverInput,
-        description="Retrieve evidence passages with full legal context. Input: `q` (+ optional `k`, `limit`). Returns matched text plus enclosing Legislation/Part/Chapter/Section/Paragraph and restriction metadata (`restrict_start_date`, `restrict_end_date`, `restrict_extent`).",
+        description="Retrieve evidence passages with full legal context. Input: `q` (+ optional `k`, `limit`). Returns matched text plus enclosing Legislation/Part/Chapter/Section/Paragraph hierarchy.",
     )
     citation_tool = StructuredTool.from_function(
         name="Citation_Network_Explorer",
@@ -875,17 +917,61 @@ Question: {question}""",
         citation_counts_tool
     ]
 
-    system_prompt = """You are a highly capable legal AI assistant.
-Use the most specific tool first. Use the Graph_Schema_Navigator before other tools to understand the schema. Prefer granular tools before Text2Cypher_Expert.
-For explicit Act/title lookup queries (for example: 'Corporation Tax Act 2010'), call Legislation_Title_Resolver first.
-For retrieval tasks, prefer Legislation_Finder (hybrid title+vector) and then vector-index-backed tools (Contextual_Text_Retriever, Citation_Network_Explorer, Semantic_Search).
-Always preserve legal context (Legislation > Part > Chapter > Section > Paragraph) when answering content questions.
-If a tool returns empty results, do not repeat the exact same call. Always include links to relevant legislation, sections and parts in your responses.
-Use Legislation_By_URI for exact act lookup, Hierarchy_Path_Resolver for context reconstruction and Citation_Counts for quick citation metrics.
-Focus on the precise problem you are asked, and do not do more than asked."""
+    system_prompt = """Du er en specialiseret dansk skattelovgivnings-AI-assistent. Vidensgrafen indeholder dansk skattelovgivning fra retsinformation.dk, herunder Personskatteloven, Ligningsloven, Selskabsskatteloven, Kildeskatteloven, Momsloven, Aktieavancebeskatningsloven, Kursgevinstloven, Afskrivningsloven, Fondsbeskatningsloven og Aktiesparekontoloven.
+
+VIGTIGE REGLER FOR SVARENES INDHOLD:
+- Citér altid specifikke beløb, satser og grænser præcist som de fremgår af lovteksten — inklusive grundbeløb og årsangivelse (f.eks. "48.300 kr. (2010-niveau)").
+- For år-specifikke spørgsmål om indekserede beløb (f.eks. "hvad er beløbet i 2025"): søg altid i vidensgrafen efter "beløbsgrænser personskattelovens § 20 2025 2026" eller "PSL § 20 reguleringstabel" — vidensgrafen indeholder Skatteministeriets reguleringstabel med indekserede beløb for 2025 og 2026 for alle PSL § 20-regulerede bestemmelser.
+- Anfør altid den konkrete paragraf og stykke (f.eks. "§ 16, stk. 4") i svaret.
+- Brug kun oplysninger fra de hentede lovtekster — suppler ikke med ekstern viden.
+
+STRUKTURELLE FAKTA (IKKE BELØB):
+- PSL § 7 (mellemskat, 7,5 %), § 7 a (topskat, 7,5 %) og § 8 (top-topskat, 5,0 %) gælder fra 1. januar 2026 (LOV nr. 482/2024). Disse tre trin erstatter den hidtidige enstrengs-topskat.
+- KSL § 48 E–F (forskerordning): skattesatsen er 27 % (bruttoskat) i op til 7 år. Nævn altid 27 % og 7-årsperioden når forskerordningen omtales. Minimumsvederlagets præcise beløb for et givet år findes i reguleringstabellen i vidensgrafen.
+- For spørgsmål om finansielle ordninger og konti (aktiesparekonto, forskerordning, pensionskonto, etableringskonto osv.): inkludér altid den gældende skattesats som del af svaret, selv om spørgsmålet kun spørger til et beløbsloft eller et krav. Hent skattesatsen ved at søge med Contextual_Text_Retriever på "beskatning skat procent [ordningsnavn]". Når du finder flere satser i et søgeresultat, anvend den sats der gælder for det generelle beskatningsgrundlag uden yderligere betingelser — ikke satser begrænset til særlige indkomsttyper (f.eks. udenlandske udbytter) eller undtagelsessituationer.
+- FRAVALG: Når en skat ikke finder anvendelse, anfør eksplicit "der betales ikke [skattenavn]".
+
+FORMUESKAT: Der findes ingen formueskat i Danmark. Den almindelige formueskat (formueskattepligten) blev afskaffet i 1997. Anfør eksplicit "afskaffet i 1997" når nogen spørger om formueskat. Formue beskattes kun indirekte via afkast (kapitalindkomst, aktieindkomst, ejendomsværdiskat).
+
+VÆRKTØJSANVISNINGER:
+Brug det mest specifikke værktøj først. Foretræk Legislation_Finder (hybrid titel+vektor) og vektorbaserede værktøjer (Contextual_Text_Retriever, Semantic_Search) til indholdsspørgsmål.
+For eksplicit titel-opslag (f.eks. 'Personskatteloven'), kald Legislation_Title_Resolver først.
+Bevar altid den juridiske kontekst (Lovgivning > Del > Kapitel > Afsnit > Paragraf) i svaret.
+Hvis et værktøj returnerer tomme resultater, så gentag ikke præcis det samme kald. Inkludér links til relevante love, afsnit og paragraffer i svaret.
+Brug Legislation_By_URI til eksakt lovopslag, Hierarchy_Path_Resolver til kontekstrekonstruktion og Citation_Counts til hurtige citationsmetrikker.
+Contextual_Text_Retriever: brug beskrivende emnesætninger om INDHOLDET (f.eks. "fri bil skattepligtig værdi arbejdsgiver procent"), IKKE paragrafhenvisninger (f.eks. "LL § 16 stk. 4"). Paragrafhenvisninger i søgestrengen forringer søgekvaliteten markant.
+For spørgsmål om skattepligt af personalegoder, naturalier eller gaver fra arbejdsgiver: Undersøg ALTID LL § 16 stk. 3 (den generelle bagatelgrænse) som primær hjemmel, inden du fokuserer på særregler (§ 7 U jubilæumsgaver, § 7 M reklamegaver osv.). Citér den generelle regel som grundlag og nævn særreglerne som undtagelser.
+Svar på dansk når spørgsmålet stilles på dansk. Fokusér på det præcise spørgsmål og gør ikke mere end bedt."""
 
     agent_executor = create_agent(llm, tools, system_prompt=system_prompt)
-    return analysis, agent_executor
+    return analysis, agent_executor, tools
+
+
+def _extract_llm_thinking(content) -> tuple[str, str]:
+    """Return (thinking_text, answer_text) from an AIMessage content.
+
+    Handles both Gemini structured thinking blocks and Ollama <think> tags.
+    """
+    thinking = ""
+    if isinstance(content, list):
+        for block in content:
+            if isinstance(block, dict) and block.get("type") == "thinking":
+                thinking = block.get("thinking", "") or block.get("text", "")
+        # Exclude thinking-type blocks from the displayed answer
+        texts = [
+            b.get("text", "") for b in content
+            if isinstance(b, dict) and b.get("type") != "thinking"
+        ]
+        text = "\n".join(t for t in texts if t).strip()
+    elif isinstance(content, str):
+        # Ollama models (DeepSeek, Qwen, Gemma with thinking) use <think>…</think>
+        m = re.search(r'<think(?:ing)?>(.*?)</think(?:ing)?>', content, re.DOTALL)
+        if m:
+            thinking = m.group(1).strip()
+        text = re.sub(r'<think(?:ing)?>.*?</think(?:ing)?>', '', content, flags=re.DOTALL).strip()
+    else:
+        text = str(content).strip()
+    return thinking, text
 
 
 def stream_agent_answer(
@@ -897,6 +983,7 @@ def stream_agent_answer(
     tool_events = []
     run_start = time.perf_counter()
     tool_start_times = defaultdict(deque)
+    llm_call_start = run_start
     debug_tools = DEBUG_TOOL_CALLS
 
     lc_messages = []
@@ -923,6 +1010,20 @@ def stream_agent_answer(
             msg_type = getattr(msg, "type", None)
 
             if msg_type == "ai" and getattr(msg, "tool_calls", None):
+                _now = time.perf_counter()
+                _usage = getattr(msg, "usage_metadata", None) or {}
+                _thinking, _ = _extract_llm_thinking(getattr(msg, "content", ""))
+                tool_events.append({
+                    "elapsed_s": elapsed,
+                    "node": node_name,
+                    "type": "llm_call",
+                    "start_s": round(llm_call_start - run_start, 3),
+                    "duration_s": round(_now - llm_call_start, 3),
+                    "input_tokens": int(_usage.get("input_tokens") or 0),
+                    "output_tokens": int(_usage.get("output_tokens") or 0),
+                    "thinking": _thinking,
+                    "is_final": False,
+                })
                 for tool_call in msg.tool_calls:
                     tool_name = tool_call.get("name", "unknown")
                     tool_args = tool_call.get("args", {})
@@ -968,6 +1069,7 @@ def stream_agent_answer(
                         "content_preview": preview,
                     }
                 )
+                llm_call_start = time.perf_counter()
                 if on_tool_event:
                     on_tool_event(tool_events)
                 if debug_tools:
@@ -977,12 +1079,21 @@ def stream_agent_answer(
                     )
 
             elif msg_type == "ai":
-                content = getattr(msg, "content", "")
-                if isinstance(content, list):
-                    text_blocks = [b.get("text", "") for b in content if isinstance(b, dict)]
-                    text = "\n".join([t for t in text_blocks if t]).strip()
-                else:
-                    text = str(content).strip()
+                _now = time.perf_counter()
+                _usage = getattr(msg, "usage_metadata", None) or {}
+                _thinking, text = _extract_llm_thinking(getattr(msg, "content", ""))
+
+                tool_events.append({
+                    "elapsed_s": elapsed,
+                    "node": node_name,
+                    "type": "llm_call",
+                    "start_s": round(llm_call_start - run_start, 3),
+                    "duration_s": round(_now - llm_call_start, 3),
+                    "input_tokens": int(_usage.get("input_tokens") or 0),
+                    "output_tokens": int(_usage.get("output_tokens") or 0),
+                    "thinking": _thinking,
+                    "is_final": True,
+                })
 
                 if text:
                     final_answer = text
@@ -990,40 +1101,821 @@ def stream_agent_answer(
     return final_answer, tool_events
 
 
-st.title("UK Legislation Graph Agent")
-st.caption("A demonstration of time aware GraphRAG for policy, tax and legal governance.")
+def log_trajectory(question: str, answer: str, tool_events: list[dict], total_latency_s: float):
+    """Append one query trajectory to eval_log.jsonl for offline analysis."""
+    tool_calls = [e for e in tool_events if e["type"] == "tool_call"]
+    record = {
+        "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "question": question,
+        "answer": answer,
+        "total_latency_s": round(total_latency_s, 3),
+        "step_count": len(tool_calls),
+        "tool_sequence": [e["tool_name"] for e in tool_calls],
+        "tool_durations": {
+            e["tool_name"]: e.get("duration_s")
+            for e in tool_events
+            if e["type"] == "tool_result"
+        },
+    }
+    log_path = os.path.join(os.path.dirname(__file__), "eval_log.jsonl")
+    with open(log_path, "a", encoding="utf-8") as f:
+        f.write(json.dumps(record, ensure_ascii=False) + "\n")
+
+
+# ── Eval helpers (ported from eval_run.py) ────────────────────────────────────
+
+def _eval_normalize(text: str) -> str:
+    text = text.lower()
+    text = re.sub(r'\bpct\.', '%', text)
+    text = re.sub(r'\s+%', '%', text)
+    text = re.sub(r'(\d)[.,](\d{3})(?!\d)', r'\1\2', text)
+    # Accept "kilometer/kilometre/kilometers/kilometres" as "km"
+    text = re.sub(r'\bkilomet(?:er|re)s?\b', 'km', text)
+    return text
+
+
+_BEHAVIOR_SIGNALS: dict[str, list[str]] = {
+    "refuse": ["vil jeg ikke", "hjælper ikke med", "kan ikke hjælpe", "ulovlig", "skatteunddragelse"],
+    "clarify": ["kan du oplyse", "hvad mener du", "mere information", "præcisere", "uddybe"],
+    "correct_premise": [
+        "præmissen er forkert", "nej, det er ikke rigtigt", "ingen formueskat",
+        "afskaffet", "det er forkert", "ikke korrekt", "der er ingen",
+    ],
+    "admit_unknown": ["kan ikke finde", "findes ikke i", "eksisterer ikke", "ingen §", "ingen paragraf"],
+}
+
+
+def _eval_detect_behavior(answer: str) -> str:
+    lower = answer.lower()
+    for behavior, signals in _BEHAVIOR_SIGNALS.items():
+        if any(sig in lower for sig in signals):
+            return behavior
+    return "answer"
+
+
+def _eval_score_item(item: dict, answer: str, tool_events: list) -> dict:
+    answer_norm = _eval_normalize(answer)
+    must_contain = item.get("must_contain") or []
+    must_not_contain = item.get("must_not_contain") or []
+
+    mc_details = {term: _eval_normalize(term) in answer_norm for term in must_contain}
+    mnc_details = {term: _eval_normalize(term) not in answer_norm for term in must_not_contain}
+    mc_pass = all(mc_details.values()) if mc_details else True
+    mnc_pass = all(mnc_details.values()) if mnc_details else True
+
+    detected = _eval_detect_behavior(answer)
+    behavior_match = detected == item.get("expected_behavior", "answer")
+
+    tool_calls = [e for e in tool_events if e["type"] == "tool_call"]
+
+    expected_legislation = item.get("expected_legislation") or []
+    citation_checks = []
+    for leg in expected_legislation:
+        paragraf = leg.get("paragraf", "")
+        lov = leg.get("lov", "")
+        found = bool(paragraf) and (f"§ {paragraf}" in answer or f"§{paragraf}" in answer)
+        citation_checks.append({"lov": lov, "paragraf": paragraf, "found": found})
+    citation_pass = all(c["found"] for c in citation_checks) if citation_checks else True
+
+    return {
+        "must_contain_pass": mc_pass,
+        "must_contain_details": mc_details,
+        "must_not_contain_pass": mnc_pass,
+        "must_not_contain_details": mnc_details,
+        "expected_behavior": item.get("expected_behavior"),
+        "detected_behavior": detected,
+        "behavior_match": behavior_match,
+        "expected_legislation_check": citation_checks,
+        "citation_pass": citation_pass,
+        "tool_call_count": len(tool_calls),
+        "tool_sequence": [e["tool_name"] for e in tool_calls],
+        "overall_pass": mc_pass and mnc_pass and behavior_match and citation_pass,
+    }
+
+
+def _eval_run_case(item: dict, agent_executor) -> dict:
+    chat_messages = [{"role": "user", "content": item["question"]}]
+    t0 = time.perf_counter()
+    try:
+        answer, tool_events = stream_agent_answer(agent_executor, chat_messages)
+    except Exception as exc:
+        answer = f"[ERROR: {exc}]"
+        tool_events = []
+    latency = round(time.perf_counter() - t0, 3)
+    result = {
+        "answer": answer,
+        "latency_s": latency,
+        "scores": _eval_score_item(item, answer, tool_events),
+        "tool_events": tool_events,
+    }
+    st.session_state.eval_results[item["id"]] = result
+    return result
+
+
+def validate_citations(answer: str, analysis: "Neo4jAnalysis") -> list[dict]:
+    """Extract § references from answer and verify each exists in Neo4j."""
+    pattern = re.compile(r'§\s*(\d+\s*[A-Za-z]?)', re.UNICODE)
+    refs = list(dict.fromkeys(m.group(0).strip() for m in pattern.finditer(answer)))
+    if not refs:
+        return []
+
+    results = []
+    for ref in refs:
+        num = re.sub(r'^§\s*', '', ref).strip()
+        rows = analysis.run_query(
+            "MATCH (s:Section) WHERE s.number = $num RETURN s.number AS number LIMIT 1",
+            {"num": num},
+        )
+        results.append({"citation": ref, "found": len(rows) > 0})
+    return results
+
+
+# ── Architecture / Trace / Eval renderers ─────────────────────────────────────
+
+def _render_mermaid(diagram: str, height: int = 420) -> None:
+    # Use mermaid.render() (explicit API) instead of startOnLoad so diagrams
+    # in inactive Streamlit tabs initialise correctly when the tab is opened.
+    uid = str(abs(hash(diagram)))[:10]
+    diagram_json = json.dumps(diagram)
+    html = f"""
+    <div id="diagram-{uid}" style="font-size:14px;"></div>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+    <script>
+        mermaid.initialize({{startOnLoad:false,theme:'default',securityLevel:'loose'}});
+        mermaid.render('svg-{uid}', {diagram_json})
+            .then(function(r){{
+                document.getElementById('diagram-{uid}').innerHTML = r.svg;
+            }})
+            .catch(function(e){{
+                document.getElementById('diagram-{uid}').innerHTML =
+                    '<pre style="color:red">' + e + '</pre>';
+            }});
+    </script>
+    """
+    components.html(html, height=height, scrolling=True)
+
+
+def _render_architecture() -> None:
+    st.subheader("System Architecture")
+
+    # Three diagrams rendered in ONE iframe with JS-driven tabs.
+    # Using separate iframes (one per Streamlit tab) causes Mermaid startOnLoad
+    # to miss inactive tabs; the single-iframe pattern avoids this entirely.
+    diagrams = [
+        ("System Overview", """graph TD
+    A["User Browser"] --> B["Streamlit App"]
+    B --> C["LangGraph Agent - ReAct Loop"]
+    C --> D["LLM - Gemini 2.5 Flash"]
+    D --> C
+    C --> E["Tool Dispatcher - 13 StructuredTools"]
+    E --> F[("Neo4j Aura - Graph Database")]
+    E --> G[("Vector Index - text_embeddings_index - 1024 dims")]
+    F -.->|Cypher results| E
+    G -.->|Top-k hits| E
+    H["HuggingFace - intfloat/multilingual-e5-large"] -->|embed query| G
+    I["Retsinformation.dk - Danish Tax Law XML"] --> J["Pipeline: crawler -> loader -> vectorize -> index"]
+    J --> F
+    J -->|embed passages| H
+    style A fill:#e8f4f8,stroke:#4C78A8
+    style C fill:#fff3cd,stroke:#F58518
+    style D fill:#d4edda,stroke:#54A24B
+    style F fill:#f8d7da,stroke:#E45756
+    style G fill:#f8d7da,stroke:#E45756"""),
+
+        ("Agent ReAct Loop", """stateDiagram-v2
+    state "Think: LLM generates next step" as Think
+    state "Call Tools: Execute selected tools" as CallTools
+    state "Observe: Inject tool results into context" as Observe
+    state "Answer: Formulate and stream response" as Answer
+    [*] --> Think : User message received
+    Think --> CallTools : tool_calls in response
+    Think --> Answer : no tool_calls
+    CallTools --> Observe : tool results returned
+    Observe --> Think : loop back
+    Answer --> [*]"""),
+
+        ("Graph Schema", """graph TD
+    L["Legislation - title, uri, status"] -->|HAS_PART| P["Part"]
+    P -->|HAS_CHAPTER| CH["Chapter"]
+    CH -->|HAS_SECTION| S["Section"]
+    S -->|HAS_PARAGRAPH| PAR["Paragraph - text"]
+    PAR -->|HAS_COMMENTARY| COM["Commentary"]
+    COM -->|HAS_CITATION| CIT["Citation"]
+    CIT -->|CITES| L2["Legislation"]
+    L -->|HAS_SCHEDULE| SCH["Schedule"]
+    SCH -->|HAS_SUBPARAGRAPH| SP["ScheduleParagraph"]
+    L -->|HAS_EXPLANATORY_NOTES| EN["ExplanatoryNotes"]
+    EN --> ENP["ExplanatoryNotesParagraph"]
+    L -->|SUPERSEDES| L3["Legislation"]
+    L -->|SUPERSEDED_BY| L4["Legislation"]
+    T["Text node - embedding float 1024"] -.->|linked to| PAR
+    style L fill:#4C78A8,color:#fff
+    style P fill:#F58518,color:#fff
+    style CH fill:#72B7B2,color:#fff
+    style S fill:#E45756,color:#fff
+    style PAR fill:#B279A2,color:#fff
+    style T fill:#54A24B,color:#fff"""),
+    ]
+
+    tab_names_json = json.dumps([n for n, _ in diagrams])
+    diags_json = json.dumps([d for _, d in diagrams])
+
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8">
+<style>
+  body {{ margin:0; padding:0; font-family:sans-serif; }}
+  .tabs {{ display:flex; border-bottom:2px solid #e0e0e0; margin-bottom:12px; background:#fafafa; }}
+  .tab-btn {{
+    padding:9px 20px; border:none; background:transparent; cursor:pointer;
+    font-size:13px; color:#555; border-bottom:3px solid transparent;
+    margin-bottom:-2px; transition:color .15s;
+  }}
+  .tab-btn:hover {{ color:#4C78A8; }}
+  .tab-btn.active {{ color:#4C78A8; border-bottom-color:#4C78A8; font-weight:600; }}
+  .pane {{ display:none; padding:8px; }}
+  .pane.active {{ display:block; }}
+  .mermaid svg {{ max-width:100%; height:auto; }}
+</style>
+</head><body>
+<div class="tabs" id="tabs"></div>
+<div id="panes"></div>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<script>
+var names = {tab_names_json};
+var diags = {diags_json};
+var tabs = document.getElementById('tabs');
+var panes = document.getElementById('panes');
+names.forEach(function(n,i){{
+  var btn = document.createElement('button');
+  btn.className = 'tab-btn' + (i===0?' active':'');
+  btn.textContent = n;
+  btn.onclick = function(){{
+    document.querySelectorAll('.tab-btn').forEach(function(b,j){{b.classList.toggle('active',j===i);}});
+    document.querySelectorAll('.pane').forEach(function(p,j){{p.classList.toggle('active',j===i);}});
+  }};
+  tabs.appendChild(btn);
+  var pane = document.createElement('div');
+  pane.className = 'pane' + (i===0?' active':'');
+  pane.id = 'pane'+i;
+  panes.appendChild(pane);
+}});
+mermaid.initialize({{startOnLoad:false,theme:'default',securityLevel:'loose'}});
+diags.forEach(function(d,i){{
+  mermaid.render('msvg'+i, d)
+    .then(function(r){{ document.getElementById('pane'+i).innerHTML = r.svg; }})
+    .catch(function(e){{ document.getElementById('pane'+i).innerHTML =
+      '<pre style="color:red;font-size:12px">' + (e.message||e) + '</pre>'; }});
+}});
+</script>
+</body></html>"""
+    components.html(html, height=660, scrolling=True)
+
+
+def _render_trace_waterfall(tool_events: list) -> None:
+    rows = []
+    call_queue: dict[str, deque] = defaultdict(deque)
+    llm_count = 0
+
+    for e in tool_events:
+        etype = e.get("type")
+        if etype == "llm_call":
+            llm_count += 1
+            label = f"LLM call {llm_count}" + (" (final)" if e.get("is_final") else "")
+            tok_detail = f"in: {e.get('input_tokens', 0):,} | out: {e.get('output_tokens', 0):,} tokens"
+            rows.append({
+                "step": label,
+                "type": "LLM",
+                "start": e.get("start_s", 0.0),
+                "end": e.get("start_s", 0.0) + e.get("duration_s", 0.0),
+                "duration": round(e.get("duration_s", 0.0), 3),
+                "detail": tok_detail,
+            })
+        elif etype == "tool_call":
+            call_queue[e["tool_name"]].append(e)
+        elif etype == "tool_result":
+            name = e["tool_name"]
+            call_e = call_queue[name].popleft() if call_queue[name] else {}
+            start = call_e.get("elapsed_s", e["elapsed_s"])
+            duration = e.get("duration_s") or max(0.0, e["elapsed_s"] - start)
+            rows.append({
+                "step": name,
+                "type": "Tool",
+                "start": round(start, 3),
+                "end": round(start + duration, 3),
+                "duration": round(duration, 3),
+                "detail": "",
+            })
+
+    if not rows:
+        st.caption("No timing data available for this request.")
+        return
+
+    df = pd.DataFrame(rows)
+    bar_height = max(180, len(rows) * 38 + 60)
+
+    chart = (
+        alt.Chart(df)
+        .mark_bar(cornerRadiusEnd=4)
+        .encode(
+            x=alt.X("start:Q", title="Seconds from request start", axis=alt.Axis(format=".1f")),
+            x2="end:Q",
+            y=alt.Y("step:N", sort=None, title=""),
+            color=alt.Color(
+                "type:N",
+                scale=alt.Scale(domain=["LLM", "Tool"], range=["#4C78A8", "#F58518"]),
+                legend=alt.Legend(title="Step type"),
+            ),
+            tooltip=[
+                alt.Tooltip("step:N", title="Step"),
+                alt.Tooltip("type:N", title="Type"),
+                alt.Tooltip("start:Q", format=".3f", title="Start (s)"),
+                alt.Tooltip("duration:Q", format=".3f", title="Duration (s)"),
+                alt.Tooltip("detail:N", title="Detail"),
+            ],
+        )
+        .properties(height=bar_height, title="Request execution timeline")
+    )
+    st.altair_chart(chart, use_container_width=True)
+
+
+def _render_trace_steps(tool_events: list, key_prefix: str = "trace") -> None:
+    paired: list[tuple] = []
+    call_queue: dict[str, deque] = defaultdict(deque)
+
+    for e in tool_events:
+        etype = e.get("type")
+        if etype == "llm_call":
+            paired.append(("llm", e, None))
+        elif etype == "tool_call":
+            call_queue[e["tool_name"]].append(e)
+        elif etype == "tool_result":
+            name = e["tool_name"]
+            call_e = call_queue[name].popleft() if call_queue[name] else {}
+            paired.append(("tool", call_e, e))
+
+    llm_idx = 0
+    for step_idx, (kind, ev1, ev2) in enumerate(paired):
+        if kind == "llm":
+            llm_idx += 1
+            label = f"🤖 LLM call {llm_idx}" + (" — final answer" if ev1.get("is_final") else "")
+            summary = (
+                f"{ev1.get('duration_s', 0):.2f}s | "
+                f"in: {ev1.get('input_tokens', 0):,} tok | "
+                f"out: {ev1.get('output_tokens', 0):,} tok"
+            )
+            with st.expander(f"{label} — {summary}"):
+                c1, c2, c3 = st.columns(3)
+                c1.metric("Duration", f"{ev1.get('duration_s', 0):.2f}s")
+                c2.metric("Input tokens", f"{ev1.get('input_tokens', 0):,}")
+                c3.metric("Output tokens", f"{ev1.get('output_tokens', 0):,}")
+                thinking = ev1.get("thinking", "")
+                if thinking:
+                    st.markdown("**Chain-of-thought reasoning**")
+                    st.text_area(
+                        "",
+                        value=thinking,
+                        height=220,
+                        disabled=True,
+                        key=f"{key_prefix}_thinking_{step_idx}",
+                    )
+                else:
+                    st.caption("No thinking blocks captured for this step.")
+        else:
+            name = (ev2 or {}).get("tool_name", "unknown")
+            duration = (ev2 or {}).get("duration_s", 0) or 0
+            args = ev1.get("args", {}) if ev1 else {}
+            output = (ev2 or {}).get("content_preview", "")
+            with st.expander(f"🔧 {name} — {duration:.2f}s"):
+                col_a, col_b = st.columns(2)
+                with col_a:
+                    st.markdown("**Input (args)**")
+                    st.json(args)
+                with col_b:
+                    st.markdown("**Output**")
+                    if output:
+                        try:
+                            parsed = json.loads(output) if isinstance(output, str) else output
+                            st.json(parsed)
+                        except Exception:
+                            st.text(str(output)[:600])
+                    else:
+                        st.caption("(empty)")
+
+
+def _render_request_trace() -> None:
+    st.subheader("Request Trace")
+
+    if "traces" not in st.session_state or not st.session_state.traces:
+        st.info("No request traced yet. Ask a question in **Chat Interface** first.")
+        return
+
+    traces = st.session_state.traces
+
+    if len(traces) > 1:
+        idx = st.selectbox(
+            "Select request",
+            range(len(traces)),
+            format_func=lambda i: f"[{i + 1}] {traces[i]['question'][:70]}",
+            index=len(traces) - 1,
+        )
+    else:
+        idx = 0
+
+    trace = traces[idx]
+    tool_events = trace["tool_events"]
+
+    llm_events = [e for e in tool_events if e["type"] == "llm_call"]
+    tool_call_events = [e for e in tool_events if e["type"] == "tool_call"]
+    total_input = sum(e.get("input_tokens", 0) for e in llm_events)
+    total_output = sum(e.get("output_tokens", 0) for e in llm_events)
+
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total latency", f"{trace['total_latency_s']:.2f}s", border=True)
+    c2.metric("Tool calls", len(tool_call_events), border=True)
+    c3.metric("Input tokens", f"{total_input:,}", border=True)
+    c4.metric("Output tokens", f"{total_output:,}", border=True)
+
+    st.markdown("**Question:** " + trace["question"])
+
+    st.markdown("---")
+    _render_trace_waterfall(tool_events)
+    st.markdown("---")
+    st.markdown("**Step detail**")
+    _render_trace_steps(tool_events, key_prefix="main_trace")
+
+
+_DIFF_ICON = {"easy": "🟢", "medium": "🟡", "hard": "🔴"}
+_CAT_ICON = {
+    "typical": "📋", "temporal": "🕐", "adversarial": "⚔️",
+    "edge_case": "🔍", "cross_reference": "🔗", "refusal": "🚫",
+    "hallucination_check": "🧠",
+}
+_BEHAV_ICON = {
+    "answer": "💬", "correct_premise": "🔄", "refuse": "🚫",
+    "clarify": "❓", "admit_unknown": "🤷",
+}
+
+
+def _render_evaluation(agent_executor) -> None:
+    st.subheader("Evaluation Panel")
+
+    gs_path = os.path.join(os.path.dirname(__file__), "eval_golden_set.json")
+    try:
+        with open(gs_path, encoding="utf-8") as f:
+            golden = json.load(f)
+        items = golden["items"]
+    except Exception as exc:
+        st.error(f"Could not load eval_golden_set.json: {exc}")
+        return
+
+    if "eval_results" not in st.session_state:
+        st.session_state.eval_results = {}
+    if "eval_selected_idx" not in st.session_state:
+        st.session_state.eval_selected_idx = 0
+
+    results = st.session_state.eval_results
+    n_total = len(items)
+    n_run = sum(1 for it in items if it["id"] in results)
+    n_pass = sum(1 for it in items if results.get(it["id"], {}).get("scores", {}).get("overall_pass"))
+
+    # ── Stats + actions ───────────────────────────────────────────────────────
+    c1, c2, c3, c4 = st.columns(4)
+    c1.metric("Total cases", n_total, border=True)
+    c2.metric("Tested", n_run, border=True)
+    c3.metric("Passed", n_pass, border=True)
+    c4.metric("Pass rate", f"{100 * n_pass // n_run}%" if n_run else "—", border=True)
+
+    col_run, col_clear = st.columns([2, 1])
+    with col_run:
+        if st.button("▶▶ Run all cases", type="primary"):
+            bar = st.progress(0)
+            status_ph = st.empty()
+            for i, item in enumerate(items):
+                status_ph.text(f"Running {item['id']}: {item['question'][:55]}…")
+                _eval_run_case(item, agent_executor)
+                bar.progress((i + 1) / n_total)
+            status_ph.text("Done.")
+            st.rerun()
+    with col_clear:
+        if st.button("Clear results"):
+            st.session_state.eval_results = {}
+            st.rerun()
+
+    # ── Visual case browser ───────────────────────────────────────────────────
+    st.markdown("---")
+    st.markdown("**Click a row to inspect the case below.**")
+
+    browser_rows = []
+    for it in items:
+        res = results.get(it["id"])
+        if res:
+            sc = res["scores"]
+            status = "✅" if sc["overall_pass"] else "❌"
+            lat = f"{res['latency_s']:.1f}s"
+            mc = "✅" if sc["must_contain_pass"] else "❌"
+            beh = "✅" if sc["behavior_match"] else "❌"
+            cit = "✅" if sc["citation_pass"] else "❌"
+        else:
+            status = lat = mc = beh = cit = "⬜"
+        browser_rows.append({
+            "Pass": status,
+            "ID": it["id"],
+            "Category": f"{_CAT_ICON.get(it['category'], '📄')} {it['category']}",
+            "Difficulty": f"{_DIFF_ICON.get(it['difficulty'], '⚪')} {it['difficulty']}",
+            "Question": it["question"][:65] + ("…" if len(it["question"]) > 65 else ""),
+            "MC": mc,
+            "Behavior": beh,
+            "Citations": cit,
+            "Latency": lat,
+        })
+
+    browser_df = pd.DataFrame(browser_rows)
+    try:
+        event = st.dataframe(
+            browser_df,
+            use_container_width=True,
+            hide_index=True,
+            on_select="rerun",
+            selection_mode="single-row",
+            key="eval_case_browser",
+            column_config={
+                "Pass": st.column_config.TextColumn(width="small"),
+                "ID": st.column_config.TextColumn(width="small"),
+                "Category": st.column_config.TextColumn(width="medium"),
+                "Difficulty": st.column_config.TextColumn(width="small"),
+                "Question": st.column_config.TextColumn(width="large"),
+                "MC": st.column_config.TextColumn("Must contain", width="small"),
+                "Behavior": st.column_config.TextColumn(width="small"),
+                "Citations": st.column_config.TextColumn(width="small"),
+                "Latency": st.column_config.TextColumn(width="small"),
+            },
+        )
+        sel = event.selection.rows
+        if sel:
+            st.session_state.eval_selected_idx = sel[0]
+    except Exception:
+        st.dataframe(browser_df, use_container_width=True, hide_index=True)
+
+    case_idx = min(st.session_state.eval_selected_idx, n_total - 1)
+    item = items[case_idx]
+    item_result = results.get(item["id"])
+
+    # ── Case detail ───────────────────────────────────────────────────────────
+    st.markdown("---")
+
+    # Header row: ID + metadata badges
+    diff_icon = _DIFF_ICON.get(item["difficulty"], "⚪")
+    cat_icon = _CAT_ICON.get(item["category"], "📄")
+    behav_icon = _BEHAV_ICON.get(item.get("expected_behavior", "answer"), "💬")
+    st.markdown(
+        f"### {item['id']} &nbsp; {cat_icon} `{item['category']}` &nbsp; "
+        f"{diff_icon} `{item['difficulty']}` &nbsp; "
+        f"pillar: `{item['pillar']}` &nbsp; "
+        f"expected: {behav_icon} `{item.get('expected_behavior', 'answer')}`"
+    )
+    st.markdown(f"**{item['question']}**")
+
+    col_def, col_meta = st.columns([3, 2])
+
+    with col_def:
+        with st.expander("Expected answer"):
+            st.markdown(item.get("expected_answer", "—"))
+
+        st.markdown("**Must contain:**")
+        for term in item.get("must_contain", []):
+            if item_result:
+                found = item_result["scores"]["must_contain_details"].get(term, False)
+                icon = "✅" if found else "❌"
+            else:
+                icon = "⬜"
+            st.markdown(f"&nbsp;&nbsp;{icon} `{term}`")
+
+        if item.get("must_not_contain"):
+            st.markdown("**Must NOT contain:**")
+            for term in item["must_not_contain"]:
+                if item_result:
+                    ok = item_result["scores"]["must_not_contain_details"].get(term, True)
+                    icon = "✅" if ok else "❌"
+                else:
+                    icon = "⬜"
+                st.markdown(f"&nbsp;&nbsp;{icon} `{term}`")
+
+    with col_meta:
+        if item.get("expected_legislation"):
+            st.markdown("**Expected legislation:**")
+            for leg in item["expected_legislation"]:
+                if item_result:
+                    checks = {
+                        f"{c['lov']} § {c['paragraf']}": c["found"]
+                        for c in item_result["scores"].get("expected_legislation_check", [])
+                    }
+                    key = f"{leg['lov']} § {leg['paragraf']}"
+                    icon = "✅" if checks.get(key, False) else ("❌" if item_result else "⬜")
+                else:
+                    icon = "⬜"
+                st.markdown(f"&nbsp;&nbsp;{icon} {leg['lov']} § {leg['paragraf']}")
+
+        if item.get("notes"):
+            with st.expander("Notes"):
+                st.caption(item["notes"])
+
+    # Run button
+    if st.button(f"▶ Run {item['id']}", type="secondary"):
+        with st.spinner(f"Running {item['id']}…"):
+            _eval_run_case(item, agent_executor)
+        st.rerun()
+
+    # ── Result (only when available, no repetition of definition) ────────────
+    if item_result:
+        sc = item_result["scores"]
+        overall_icon = "✅ PASS" if sc["overall_pass"] else "❌ FAIL"
+
+        llm_evts = [e for e in item_result["tool_events"] if e["type"] == "llm_call"]
+        in_tok = sum(e.get("input_tokens", 0) for e in llm_evts)
+        out_tok = sum(e.get("output_tokens", 0) for e in llm_evts)
+
+        r1, r2, r3, r4, r5 = st.columns(5)
+        r1.metric("Result", overall_icon, border=True)
+        r2.metric("Latency", f"{item_result['latency_s']:.2f}s", border=True)
+        r3.metric("Tools", sc["tool_call_count"], border=True)
+        r4.metric("In tokens", f"{in_tok:,}", border=True)
+        r5.metric("Out tokens", f"{out_tok:,}", border=True)
+
+        # Behavior check (only field not already shown in the must_contain/citation grids above)
+        beh_ok = sc["behavior_match"]
+        st.markdown(
+            f"**Behavior:** {'✅' if beh_ok else '❌'} "
+            f"detected `{sc['detected_behavior']}` — expected `{sc['expected_behavior']}`"
+        )
+
+        with st.expander("Actual answer"):
+            st.markdown(item_result["answer"])
+
+        with st.expander("Tool trace"):
+            _render_trace_waterfall(item_result["tool_events"])
+            _render_trace_steps(item_result["tool_events"], key_prefix=f"eval_{item['id']}")
+
+
+def _render_tools(tools: list) -> None:
+    st.subheader("Agent Tools")
+
+    # Categorise tools by retrieval strategy — used as a badge
+    _VECTOR_TOOLS = {"Legislation_Finder", "Contextual_Text_Retriever", "Citation_Network_Explorer", "Semantic_Search"}
+    _CYPHER_TOOLS = {"Read_Only_Cypher", "Text2Cypher_Expert", "Graph_Schema_Navigator"}
+    _HYBRID_TOOLS = {"Legislation_Finder"}
+    _GRAPH_TOOLS  = {"Supersedes_Network_Explorer", "Superseded_By_Network_Explorer",
+                     "Citation_Counts", "Hierarchy_Path_Resolver", "Legislation_By_URI",
+                     "Legislation_Title_Resolver"}
+
+    def _strategy_badge(name: str) -> str:
+        if name in _HYBRID_TOOLS:   return "🔀 Hybrid"
+        if name in _VECTOR_TOOLS:   return "🔍 Vector"
+        if name in _CYPHER_TOOLS:   return "🗄️ Cypher"
+        if name in _GRAPH_TOOLS:    return "🕸️ Graph"
+        return "⚙️ Other"
+
+    def _field_type(annotation) -> str:
+        if annotation is None:
+            return "any"
+        s = str(annotation)
+        for rep in [
+            ("typing.Optional[", ""), ("]", ""), ("<class '", ""), ("'>", ""),
+            ("typing.Union[", ""), (", NoneType", "?"),
+        ]:
+            s = s.replace(*rep)
+        return s
+
+    def _field_constraints(field_info) -> str:
+        parts = []
+        if field_info.default is not None:
+            from pydantic_core import PydanticUndefinedType
+            if not isinstance(field_info.default, PydanticUndefinedType):
+                parts.append(f"default={field_info.default!r}")
+        for m in getattr(field_info, "metadata", []):
+            t = type(m).__name__
+            v = getattr(m, "ge", getattr(m, "gt", getattr(m, "le", getattr(m, "lt", None))))
+            if v is not None:
+                parts.append(f"{t.lower()}={v}")
+        return ", ".join(parts)
+
+    # Build index
+    tool_index = {t.name: t for t in tools}
+    tool_names = [t.name for t in tools]
+
+    # Layout: narrow left list + wide detail panel
+    col_list, col_detail = st.columns([1, 2])
+
+    with col_list:
+        st.markdown("**Select a tool**")
+        if "tools_selected" not in st.session_state:
+            st.session_state.tools_selected = tool_names[0]
+        for name in tool_names:
+            badge = _strategy_badge(name)
+            label = f"{name.replace('_', ' ')}"
+            active = st.session_state.tools_selected == name
+            if st.button(
+                label,
+                key=f"tool_btn_{name}",
+                use_container_width=True,
+                type="primary" if active else "secondary",
+            ):
+                st.session_state.tools_selected = name
+
+    with col_detail:
+        selected_name = st.session_state.get("tools_selected", tool_names[0])
+        tool = tool_index.get(selected_name)
+        if tool is None:
+            st.info("Select a tool on the left.")
+        else:
+            badge = _strategy_badge(selected_name)
+            st.markdown(f"### {selected_name.replace('_', ' ')} &nbsp; `{badge}`")
+            st.markdown("**Description** *(what the LLM sees)*")
+            st.info(tool.description)
+
+            # Input schema
+            schema = getattr(tool, "args_schema", None)
+            if schema is not None and hasattr(schema, "model_fields"):
+                st.markdown("**Input schema**")
+                rows = []
+                for fname, finfo in schema.model_fields.items():
+                    from pydantic_core import PydanticUndefinedType
+                    required = isinstance(finfo.default, PydanticUndefinedType)
+                    rows.append({
+                        "Field": fname,
+                        "Type": _field_type(finfo.annotation),
+                        "Required": "✅" if required else "optional",
+                        "Constraints": _field_constraints(finfo),
+                        "Description": finfo.description or "",
+                    })
+                st.dataframe(rows, use_container_width=True, hide_index=True)
+            else:
+                st.markdown("**Input** — single free-text string (no structured schema)")
+
+            # Underlying function
+            fn = getattr(tool, "func", None)
+            if fn is not None:
+                st.markdown(f"**Python function** — `{fn.__name__}`")
+
+
+st.title("Dansk Skattelovgivning — Graph Agent")
+st.caption("GraphRAG over dansk skattelovgivning fra retsinformation.dk.")
 
 with st.sidebar:
-    st.image("https://pbs.twimg.com/profile_images/940510063718031360/Mv-_CAlX_400x400.jpg", width=100)
     st.subheader("Pick a view")
     selected_use_case = st.radio(
         "Select a view",
         [
             "Chat Interface",
+            "Architecture",
+            "Tools",
+            "Request Trace",
+            "Evaluation",
             "The Complete Graph",
             "Legislation Graph",
             "Parts",
             "Commentaries",
-            "Schedules",
             "Supersedes/Superseded By",
-            "Point in Time",
-            "Temporal Diff (As-Of vs As-Of)",
         ],
         index=0,
     )
+
+    # Provider selector — only show providers that have their credentials configured.
+    # Each Gemini model gets its own entry with key "gemini:<model-name>".
+    _provider_options = []
+    if OLLAMA_MODEL:
+        _provider_options.append(("ollama", f"Ollama ({OLLAMA_MODEL})"))
+    if GOOGLE_API_KEY:
+        for _gm in GEMINI_MODELS:
+            _provider_options.append((f"gemini:{_gm}", f"Gemini ({_gm})"))
+    if OPENAI_API_KEY:
+        _provider_options.append(("openai", "OpenAI (gpt-4o-mini)"))
+
+    if len(_provider_options) > 1:
+        _default = LLM_PROVIDER or f"gemini:{GEMINI_MODEL}" if GOOGLE_API_KEY else (LLM_PROVIDER or _provider_options[0][0])
+        _default_idx = next((i for i, (k, _) in enumerate(_provider_options) if k == _default), 0)
+        selected_provider = st.selectbox(
+            "LLM",
+            options=[k for k, _ in _provider_options],
+            format_func={k: label for k, label in _provider_options}.get,
+            index=_default_idx,
+        )
+    elif _provider_options:
+        selected_provider = _provider_options[0][0]
+    else:
+        selected_provider = None
 
     use_case_params = {"height": NETWORK_GRAPH_HEIGHT}
 
     if selected_use_case == "Legislation Graph":
         use_case_params["uri_contains"] = st.text_input(
             "Legislation URI contains",
-            value="ukpga/2010/4",
+            value="eli/lta/2024/460",
             key="uc_legislation_uri",
         )
     elif selected_use_case == "Parts":
         use_case_params["uri_contains"] = st.text_input(
             "Legislation URI contains",
-            value="ukpga/2010/4",
+            value="eli/lta/2024/460",
             key="uc_part_uri",
         )
         use_case_params["part_order"] = st.number_input(
@@ -1036,37 +1928,9 @@ with st.sidebar:
     elif selected_use_case == "Commentaries":
         use_case_params["uri_contains"] = st.text_input(
             "Legislation URI contains",
-            value="ukpga/2018/12",
+            value="eli/lta/2023/42",
             key="uc_commentaries_uri",
         )
-    elif selected_use_case == "Schedules":
-        use_case_params["uri_contains"] = st.text_input(
-            "Legislation URI contains",
-            value="ukpga/2010/4",
-            key="uc_schedules_uri",
-        )
-    elif selected_use_case == "Point in Time":
-        use_case_params["uri_contains"] = st.text_input(
-            "Legislation URI contains",
-            value="ukpga/2010/4",
-            key="uc_point_time_uri",
-        )
-        use_case_params["cutoff_date"] = st.date_input(
-            "Cutoff date",
-            value=date(2018, 1, 1),
-            key="uc_point_time_cutoff_date",
-        ).isoformat()
-    elif selected_use_case == "Temporal Diff (As-Of vs As-Of)":
-        use_case_params["uri_contains"] = st.text_input(
-            "Legislation URI contains",
-            value="ukpga/2010/4",
-            key="uc_temporal_diff_uri",
-        )
-        use_case_params["cutoff_date"] = st.date_input(
-            "Cutoff date",
-            value=date(2018, 1, 1),
-            key="uc_temporal_diff_cutoff",
-        ).isoformat()
 
     st.markdown("---")
     st.caption("Select 'Chat Interface' to open the assistant chat.")
@@ -1086,14 +1950,8 @@ def _render_use_case_graph(
         "Chapter": "#2ca02c",
         "Section": "#d62728",
         "Paragraph": "#9467bd",
-        "Schedule": "#8c564b",
-        "ScheduleParagraph": "#e377c2",
-        "ScheduleSubparagraph": "#7f7f7f",
         "Commentary": "#bcbd22",
         "Citation": "#17becf",
-        "CitationSubRef": "#aec7e8",
-        "ExplanatoryNotes": "#ffbb78",
-        "ExplanatoryNotesParagraph": "#98df8a"
     }
     label_to_property = {
         "Legislation": "title",
@@ -1101,14 +1959,8 @@ def _render_use_case_graph(
         "Chapter": "title",
         "Section": "title",
         "Paragraph": "number",
-        "Schedule": "title",
-        "ScheduleParagraph": "number",
-        "ScheduleSubparagraph": "number",
         "Commentary": "text",
         "Citation": "text",
-        "CitationSubRef": "text",
-        "ExplanatoryNotes": "uri",
-        "ExplanatoryNotesParagraph": "text",
     }
 
     results = analysis.run_query_viz(query, params or {})
@@ -1132,12 +1984,23 @@ def _render_use_case_graph(
     components.html(html_str, height=height, scrolling=True)
 
 
-def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_case_params: dict):
-    st.subheader(selected_use_case)
-
+def _show_use_case_panel(
+    analysis: Neo4jAnalysis,
+    selected_use_case: str,
+    use_case_params: dict,
+    agent_executor=None,
+):
     use_case_descriptions = {
         "Chat Interface":
             "**Ask natural-language questions to explore legislation structure, citations, supersession links, and point-in-time context.**",
+        "Architecture":
+            "**Three diagrams: system overview, ReAct agent loop, and graph schema.**",
+        "Tools":
+            "**Inspect all 13 agent tools: description, input schema, field constraints, and retrieval strategy.**",
+        "Request Trace":
+            "**Per-request waterfall timeline with LLM token counts, tool durations, and chain-of-thought reasoning.**",
+        "Evaluation":
+            "**Run golden-set test cases from the browser and inspect detailed pass/fail results.**",
         "The Complete Graph":
             "**Visualize the full graph schema, including available node types and how they are connected.**",
         "Legislation Graph":
@@ -1146,18 +2009,31 @@ def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_ca
             "**Focus on a specific part within a legislation and trace its chapters, sections, paragraphs, and commentary links.**",
         "Commentaries":
             "**Explore commentary and citation chains that connect interpretive notes back to legislation.**",
-        "Schedules":
-            "**View schedule structures and nested paragraphs/subparagraphs, including optional commentary citation paths.**",
         "Supersedes/Superseded By":
             "**Analyze legislation-to-legislation replacement relationships across supersedes and superseded-by links.**",
-        "Point in Time":
-            "**Use one cutoff date: left shows content active at cutoff; right shows post-cutoff content with changed nodes sized larger.**",
-        "Temporal Diff (As-Of vs As-Of)":
-            "**Use one cutoff date and compare cutoff vs today to surface provisions that were added, removed, or restricted after cutoff.**",
     }
+
+    if selected_use_case not in ("Architecture", "Request Trace", "Evaluation", "Tools"):
+        st.subheader(selected_use_case)
     st.caption(use_case_descriptions.get(selected_use_case, ""))
 
     if selected_use_case == "Chat Interface":
+        return
+
+    if selected_use_case == "Architecture":
+        _render_architecture()
+        return
+
+    if selected_use_case == "Tools":
+        _render_tools(use_case_params.get("agent_tools", []))
+        return
+
+    if selected_use_case == "Request Trace":
+        _render_request_trace()
+        return
+
+    if selected_use_case == "Evaluation":
+        _render_evaluation(agent_executor)
         return
 
     if selected_use_case == "The Complete Graph":
@@ -1180,7 +2056,7 @@ def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_ca
         _render_use_case_graph(
             analysis,
             query,
-            params={"uri_contains": use_case_params.get("uri_contains", "ukpga/2010/4")},
+            params={"uri_contains": use_case_params.get("uri_contains", "eli/lta/2024/460")},
             height=NETWORK_GRAPH_HEIGHT,
         )
     elif selected_use_case == "Parts":
@@ -1193,7 +2069,7 @@ def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_ca
             analysis,
             query,
             params={
-                "uri_contains": use_case_params.get("uri_contains", "ukpga/2010/4"),
+                "uri_contains": use_case_params.get("uri_contains", "eli/lta/2024/460"),
                 "part_order": int(use_case_params.get("part_order", 2)),
             },
             height=NETWORK_GRAPH_HEIGHT,
@@ -1207,20 +2083,7 @@ def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_ca
         _render_use_case_graph(
             analysis,
             query,
-            params={"uri_contains": use_case_params.get("uri_contains", "ukpga/2018/12")},
-            height=NETWORK_GRAPH_HEIGHT,
-        )
-    elif selected_use_case == "Schedules":
-        query = """
-        MATCH p=(l:Legislation)-[:HAS_SCHEDULE]->(sc:Schedule)-[:HAS_PARAGRAPH]->(scp:ScheduleParagraph)-[:HAS_SUBPARAGRAPH]->(scsp:ScheduleSubparagraph)
-        WHERE l.uri CONTAINS $uri_contains
-        OPTIONAL MATCH (scp)-[:HAS_COMMENTARY]-(:Commentary)-[:HAS_CITATION]-(:Citation)-[:HAS_SUBREF]->(:CitationSubRef)
-        RETURN p
-        """
-        _render_use_case_graph(
-            analysis,
-            query,
-            params={"uri_contains": use_case_params.get("uri_contains", "ukpga/2010/4")},
+            params={"uri_contains": use_case_params.get("uri_contains", "eli/lta/2023/42")},
             height=NETWORK_GRAPH_HEIGHT,
         )
     elif selected_use_case == "Supersedes/Superseded By":
@@ -1229,235 +2092,13 @@ def _show_use_case_panel(analysis: Neo4jAnalysis, selected_use_case: str, use_ca
         RETURN p
         """
         _render_use_case_graph(analysis, query, height=NETWORK_GRAPH_HEIGHT)
-    elif selected_use_case == "Point in Time":
-        left_query = """
-        MATCH p=(l:Legislation)-[:HAS_PART]->(part:Part)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(section:Section)-[:HAS_PARAGRAPH]->(para:Paragraph)-[:HAS_COMMENTARY]->(comm:Commentary)
-        WHERE l.uri CONTAINS $uri_contains
-          AND coalesce(para.restrict_start_date, date('0001-01-01')) <= date($cutoff_date)
-          AND (para.restrict_end_date IS NULL OR para.restrict_end_date >= date($cutoff_date))
-        RETURN p
-        """
-
-        right_query = """
-        MATCH p=(l:Legislation)-[:HAS_PART]->(part:Part)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(section:Section)-[:HAS_PARAGRAPH]->(para:Paragraph)-[:HAS_COMMENTARY]->(comm:Commentary)
-        WHERE l.uri CONTAINS $uri_contains
-          AND coalesce(para.restrict_end_date, date('9999-12-31')) >= date($cutoff_date)
-        RETURN p
-        """
-
-        cutoff_date = use_case_params.get("cutoff_date", "2018-01-01")
-        today_date = date.today().isoformat()
-        uri_contains = use_case_params.get("uri_contains", "ukpga/2010/4")
-
-        altered_nodes_query = """
-        MATCH (l:Legislation)-[:HAS_PART]->(:Part)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(:Section)-[:HAS_PARAGRAPH]->(para:Paragraph)-[:HAS_COMMENTARY]->(:Commentary)
-        WHERE l.uri CONTAINS $uri_contains
-        WITH para,
-             (para.restrict_start_date IS NOT NULL
-                AND para.restrict_start_date > date($cutoff_date)
-                AND para.restrict_start_date <= date($today_date)) AS started_after_cutoff,
-             (para.restrict_end_date IS NOT NULL
-                AND para.restrict_end_date > date($cutoff_date)
-                AND para.restrict_end_date <= date($today_date)) AS ended_after_cutoff,
-             (coalesce(para.restrict_end_date, date('9999-12-31')) >= date($cutoff_date)) AS visible_after_cutoff
-        WHERE para.id IS NOT NULL
-          AND visible_after_cutoff
-          AND (started_after_cutoff OR ended_after_cutoff)
-        RETURN collect(DISTINCT para.id) AS altered_ids
-        """
-
-        altered_rows = analysis.run_query(
-            altered_nodes_query,
-            {
-                "uri_contains": uri_contains,
-                "cutoff_date": cutoff_date,
-                "today_date": today_date,
-            },
-        )
-        altered_ids = set(
-            str(x)
-            for x in (altered_rows[0].get("altered_ids", []) if altered_rows else [])
-            if x is not None
-        )
-
-        left_col, right_col = st.columns(2)
-
-        with left_col:
-            st.markdown(f"**At cutoff: {cutoff_date}**")
-            _render_use_case_graph(
-                analysis,
-                left_query,
-                params={
-                    "uri_contains": uri_contains,
-                    "cutoff_date": cutoff_date,
-                },
-                height=NETWORK_GRAPH_HEIGHT,
-            )
-
-        with right_col:
-            st.markdown(f"**After cutoff: {cutoff_date} → {today_date}**")
-            _render_use_case_graph(
-                analysis,
-                right_query,
-                params={
-                    "uri_contains": uri_contains,
-                    "cutoff_date": cutoff_date,
-                },
-                height=NETWORK_GRAPH_HEIGHT,
-                enlarged_node_ids=altered_ids,
-                enlarged_node_size=50,
-            )
-    elif selected_use_case == "Temporal Diff (As-Of vs As-Of)":
-        cutoff_date = use_case_params.get("cutoff_date", "2018-01-01")
-        today_date = date.today().isoformat()
-
-        query = """
-        MATCH (l:Legislation)-[:HAS_PART]->(part:Part)-[:HAS_CHAPTER]->(:Chapter)-[:HAS_SECTION]->(section:Section)-[:HAS_PARAGRAPH]->(para:Paragraph)
-        WHERE l.uri CONTAINS $uri_contains
-        WITH l, part, section, para,
-             (coalesce(para.restrict_start_date, date('0001-01-01')) <= date($from_date)
-                AND (para.restrict_end_date IS NULL OR para.restrict_end_date >= date($from_date))) AS active_from,
-             (coalesce(para.restrict_start_date, date('0001-01-01')) <= date($to_date)
-                AND (para.restrict_end_date IS NULL OR para.restrict_end_date >= date($to_date))) AS active_to,
-             (para.restrict_start_date IS NOT NULL
-                AND para.restrict_start_date > date($from_date)
-                AND para.restrict_start_date <= date($to_date)) AS starts_between,
-             (para.restrict_end_date IS NOT NULL
-                AND para.restrict_end_date > date($from_date)
-                AND para.restrict_end_date <= date($to_date)) AS ends_between
-        WITH l, part, section, para, active_from, active_to, starts_between, ends_between,
-             CASE
-                 WHEN (NOT active_from) AND active_to THEN 'Added'
-                 WHEN active_from AND (NOT active_to) THEN 'Removed'
-                 WHEN starts_between AND ends_between THEN 'Restricted'
-                ELSE NULL
-             END AS change_type
-        WHERE change_type IS NOT NULL
-        RETURN change_type,
-               l.title AS legislation_title,
-               l.uri AS legislation_uri,
-               part.number AS part_number,
-               section.number AS section_number,
-               section.title AS section_title,
-               para.number AS paragraph_number,
-               para.uri AS paragraph_uri,
-               para.status AS paragraph_status,
-               para.restrict_start_date AS restrict_start_date,
-               para.restrict_end_date AS restrict_end_date
-        ORDER BY change_type, part_number, section_number, paragraph_number
-        LIMIT 500
-        """
-
-        rows_df = analysis.run_query_df(
-            query,
-            {
-                "uri_contains": use_case_params.get("uri_contains", "ukpga/2010/4"),
-                "from_date": cutoff_date,
-                "to_date": today_date,
-            },
-        )
-
-        if rows_df.empty:
-            st.info("No temporal differences found for the selected legislation and date range.")
-            return
-
-        added_count = int((rows_df["change_type"] == "Added").sum())
-        removed_count = int((rows_df["change_type"] == "Removed").sum())
-        restricted_count = int((rows_df["change_type"] == "Restricted").sum())
-
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Added", added_count)
-        c2.metric("Removed", removed_count)
-        c3.metric("Restricted", restricted_count)
-
-        st.markdown("#### Amendment timeline")
-        added_events = (
-            rows_df.loc[
-                (rows_df["change_type"] == "Added") & rows_df["restrict_start_date"].notna(),
-                ["restrict_start_date"],
-            ]
-            .rename(columns={"restrict_start_date": "amendment_date"})
-            .assign(change_type="Added")
-        )
-        removed_events = (
-            rows_df.loc[
-                (rows_df["change_type"] == "Removed") & rows_df["restrict_end_date"].notna(),
-                ["restrict_end_date"],
-            ]
-            .rename(columns={"restrict_end_date": "amendment_date"})
-            .assign(change_type="Removed")
-        )
-        restricted_start_events = (
-            rows_df.loc[
-                (rows_df["change_type"] == "Restricted") & rows_df["restrict_start_date"].notna(),
-                ["restrict_start_date"],
-            ]
-            .rename(columns={"restrict_start_date": "amendment_date"})
-            .assign(change_type="Restricted (start)")
-        )
-        restricted_end_events = (
-            rows_df.loc[
-                (rows_df["change_type"] == "Restricted") & rows_df["restrict_end_date"].notna(),
-                ["restrict_end_date"],
-            ]
-            .rename(columns={"restrict_end_date": "amendment_date"})
-            .assign(change_type="Restricted (end)")
-        )
-
-        timeline_df = pd.concat(
-            [added_events, removed_events, restricted_start_events, restricted_end_events],
-            ignore_index=True,
-        )
-
-        if timeline_df.empty:
-            st.info("No amendment date events found in the table rows.")
-        else:
-            timeline_df["amendment_date"] = pd.to_datetime(
-                timeline_df["amendment_date"].astype(str), errors="coerce"
-            )
-            timeline_df = timeline_df.dropna(subset=["amendment_date"])
-
-            if timeline_df.empty:
-                st.info("No valid amendment dates available to plot.")
-            else:
-                timeline_df["amendment_year"] = timeline_df["amendment_date"].dt.to_period("Y").dt.to_timestamp()
-
-                timeline_df = (
-                    timeline_df.groupby(["amendment_year", "change_type"], as_index=False)
-                    .size()
-                    .rename(columns={"size": "amendments"})
-                    .sort_values(["amendment_year", "change_type"])
-                )
-
-                timeline_chart = (
-                    alt.Chart(timeline_df)
-                    .mark_bar()
-                    .encode(
-                        x=alt.X("amendment_year:T", title="Amendment year", axis=alt.Axis(format="%Y")),
-                        y=alt.Y("sum(amendments):Q", title="Number of amendments"),
-                        color=alt.Color("change_type:N", title="Change type"),
-                        tooltip=[
-                            alt.Tooltip("year(amendment_year):T", title="Year"),
-                            alt.Tooltip("change_type:N", title="Type"),
-                            alt.Tooltip("sum(amendments):Q", title="Amendments"),
-                        ],
-                    )
-                    .properties(height=320)
-                )
-
-                st.altair_chart(timeline_chart, width="stretch")
-
-        st.markdown("#### Temporal diff rows")
-        st.dataframe(rows_df, width="stretch", hide_index=True)
 
 
 def _render_global_metrics(analysis: Neo4jAnalysis):
     query = """
     CALL() {
         MATCH (l:Legislation)
-        RETURN count(l) AS legislation_acts,
-               min(l.enactment_date) AS min_enactment_date,
-               max(l.enactment_date) AS max_enactment_date
+        RETURN count(l) AS legislation_acts
     }
     CALL() {
         MATCH (:Paragraph)
@@ -1467,29 +2108,18 @@ def _render_global_metrics(analysis: Neo4jAnalysis):
         MATCH (:Citation)
         RETURN count(*) AS citations
     }
-    RETURN legislation_acts,
-           paragraphs,
-           citations,
-           CASE
-               WHEN min_enactment_date IS NULL THEN 'N/A'
-               ELSE substring(toString(min_enactment_date), 0, 4)
-           END AS earliest_legislation_year,
-           CASE
-               WHEN max_enactment_date IS NULL THEN 'N/A'
-               ELSE substring(toString(max_enactment_date), 0, 4)
-           END AS latest_legislation_year
+    RETURN legislation_acts, paragraphs, citations
     """
 
     try:
         metrics_df = analysis.run_query_df(query)
         metrics = metrics_df.iloc[0].to_dict() if not metrics_df.empty else {}
-
         yearly_df = analysis.run_query_df(
             """
             MATCH (l:Legislation)
-            WHERE l.enactment_date IS NOT NULL
-            WITH substring(toString(l.enactment_date), 0, 4) AS enactment_year
-            RETURN enactment_year, count(*) AS legislations
+            WITH substring(l.uri, size(l.uri) - 4, 4) AS uri_year
+            WHERE uri_year =~ '[0-9]{4}'
+            RETURN uri_year AS enactment_year, count(*) AS legislations
             ORDER BY enactment_year
             """
         )
@@ -1501,8 +2131,8 @@ def _render_global_metrics(analysis: Neo4jAnalysis):
         yearly_df["legislations"].fillna(0).astype(int).tolist() if not yearly_df.empty else []
     )
 
-    earliest_year = str(metrics.get("earliest_legislation_year", "N/A"))
-    latest_year = str(metrics.get("latest_legislation_year", "N/A"))
+    earliest_year = yearly_df["enactment_year"].min() if not yearly_df.empty else "N/A"
+    latest_year = yearly_df["enactment_year"].max() if not yearly_df.empty else "N/A"
     if earliest_year == "N/A" and latest_year == "N/A":
         year_range = "N/A"
     elif earliest_year == latest_year:
@@ -1546,7 +2176,7 @@ def _render_global_metrics(analysis: Neo4jAnalysis):
     st.markdown("---")
 
 try:
-    analysis, agent_executor = build_runtime()
+    analysis, agent_executor, agent_tools = build_runtime(provider=selected_provider)
     if not analysis.verify_connection():
         st.error("Neo4j connection test failed.")
         st.stop()
@@ -1555,14 +2185,20 @@ except Exception as e:
     st.stop()
 
 _render_global_metrics(analysis)
-_show_use_case_panel(analysis, selected_use_case, use_case_params)
+use_case_params["agent_tools"] = agent_tools
+_show_use_case_panel(analysis, selected_use_case, use_case_params, agent_executor=agent_executor)
+
+if "traces" not in st.session_state:
+    st.session_state.traces = []
+if "eval_results" not in st.session_state:
+    st.session_state.eval_results = {}
 
 if selected_use_case == "Chat Interface":
     if "messages" not in st.session_state:
         st.session_state.messages = [
             {
                 "role": "assistant",
-                "content": "Ask me about UK legislation structure, citations, superseded chains, topical networks, or point-in-time context, specifically for tax themes.",
+                "content": "Stil mig spørgsmål om dansk skattelovgivning — regler, paragraffer, citationer eller sammenhænge mellem love som Personskatteloven, Ligningsloven, Momsloven og mere.",
             }
         ]
 
@@ -1587,17 +2223,37 @@ if selected_use_case == "Chat Interface":
             def _update_live_trace(events: list[dict]):
                 live_trace_placeholder.json(events)
 
+            t0 = time.perf_counter()
             with st.status("Running agent...", expanded=False):
                 answer, tool_events = stream_agent_answer(
                     agent_executor,
                     st.session_state.messages,
                     on_tool_event=_update_live_trace,
                 )
+            total_latency_s = round(time.perf_counter() - t0, 3)
 
             if not answer:
                 answer = "No response generated. Try a more specific prompt (Act title, URI, or topic)."
 
             st.markdown(answer)
+
+            citation_results = validate_citations(answer, analysis)
+            if citation_results:
+                with st.expander("Citation validation", expanded=False):
+                    for r in citation_results:
+                        icon = "✅" if r["found"] else "❌"
+                        st.markdown(f"{icon} `{r['citation']}` — {'found in graph' if r['found'] else 'NOT found in graph'}")
+
+            log_trajectory(prompt, answer, tool_events, total_latency_s)
+
+            st.session_state.traces.append({
+                "question": prompt,
+                "answer": answer,
+                "total_latency_s": total_latency_s,
+                "tool_events": tool_events,
+            })
+            if len(st.session_state.traces) > 20:
+                st.session_state.traces.pop(0)
 
         st.session_state.messages.append(
             {

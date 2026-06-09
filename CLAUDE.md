@@ -4,21 +4,16 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Neo4j knowledge graph of UK legislation texts sourced from [legislation.gov.uk](https://www.legislation.gov.uk/) (CLML/XML format). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for legal and professional services. The Streamlit app (`app.py`) is the main deliverable.
+A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law. The Streamlit app (`app.py`) is the main deliverable.
+
+Laws in the graph: Personskatteloven (PSL), Ligningsloven (LL, 4 versions incl. 2025/1500), Selskabsskatteloven (SEL), Kildeskatteloven (KSL, 2 versions), Momsloven (ML), Aktieavancebeskatningsloven (ABL), Kursgevinstloven (KGL), Afskrivningsloven (AL), Fondsbeskatningsloven (FBL), Aktiesparekontoloven (ASKL), LOV 482/2024, PSL § 20 reguleringstabel 2025–2026.
 
 ## Environment Setup
 
-Uses Conda. Create and activate the environment:
+Uses a local `.venv`. Activate and run with:
 
 ```bash
-conda env create -f environment.yml
-conda activate legal-legislation-explorer
-```
-
-## Running the App
-
-```bash
-streamlit run app.py
+.venv/bin/streamlit run app.py
 ```
 
 Requires a `.env` file with:
@@ -34,13 +29,16 @@ AGENT_HISTORY_MESSAGES=20  # optional
 DEBUG_TOOL_CALLS=1         # optional, enables tool call debug logging
 ```
 
-## Pipeline Notebooks (run in order)
+## Pipeline Notebooks (run in order for Danish graph)
 
-1. **`crawler.ipynb`** — Recursively crawls legislation.gov.uk from seed URLs in `legislation_list.txt`, parses CLML XML, and outputs JSON.
+1. **`danish_crawler.ipynb`** — Crawls retsinformation.dk from seed URLs in `danish_tax_legislation.txt`, parses XML, and outputs JSON.
 2. **`loader.ipynb`** — Loads parsed JSON into Neo4j using PySpark. Builds the graph nodes and relationships.
-3. **`vectorize.ipynb`** — Embeds `Text` nodes using `nlpaueb/legal-bert-base-uncased` (HuggingFace) and writes embeddings back to Neo4j.
+3. Vectorization — run `/tmp/vectorize_danish.py` (uses `intfloat/multilingual-e5-large`, 1024 dims, CUDA; uses `passage: ` prefix per multilingual-e5 convention; auto-detects unembedded nodes).
 4. **`indices.ipynb`** — Creates Neo4j vector and text indexes (including `text_embeddings_index` used by the app).
-5. **`examples.ipynb`** — Demonstrates Cypher queries for temporal analysis, citation networks, and shortest-path queries.
+
+Seed file: `danish_tax_legislation.txt` — lists all loaded laws as ELI year/number pairs (e.g. `2021/1284` → `https://www.retsinformation.dk/eli/lta/2021/1284/xml`).
+
+Note: `_uk_archive/` contains the original UK pipeline notebooks (`crawler.ipynb`, `vectorize.ipynb`, `examples.ipynb`) and seed list (`legislation_list.txt`) from when this project targeted legislation.gov.uk. They are kept for reference only and are not part of the active pipeline.
 
 ## Architecture
 
@@ -57,12 +55,14 @@ Key relationships: `HAS_PART`, `HAS_CHAPTER`, `HAS_SECTION`, `HAS_PARAGRAPH`, `H
 
 Temporal fields on nodes: `restrict_start_date`, `restrict_end_date`, `restrict_extent`, `status`. These enable point-in-time queries.
 
+Embedding model: `intfloat/multilingual-e5-large` (1024 dims). Uses `passage: ` prefix for indexing and `query: ` prefix for search queries, per the model's convention.
+
 ### `app.py` — Streamlit Agent App
 
 `build_runtime()` (cached via `@st.cache_resource`) initializes everything at startup:
 - **`Neo4jAnalysis`** (`neo4j_analysis.py`) — thin wrapper around the Neo4j driver; `run_query` → list of dicts, `run_query_df` → DataFrame, `run_query_viz` → graph object for `neo4j-viz`.
-- **LLM** — `gemini-2.5-flash` (Google) if `GOOGLE_API_KEY` set, else `gpt-5-mini` (OpenAI).
-- **Embeddings** — `nlpaueb/legal-bert-base-uncased` via HuggingFace.
+- **LLM** — priority: Ollama (if `OLLAMA_MODEL` set) → Gemini (`gemini-2.5-flash` if `GOOGLE_API_KEY` set) → OpenAI (`gpt-4o-mini` if `OPENAI_API_KEY` set).
+- **Embeddings** — `intfloat/multilingual-e5-large` via HuggingFace (1024 dims).
 - **`GraphCypherQAChain`** — NL-to-Cypher fallback using a detailed prompt with 14 rules.
 - **`Neo4jVector`** — reads from `text_embeddings_index` on `Text` nodes.
 - **Agent tools** — 13 LangChain `StructuredTool`s wrapping Cypher queries and hybrid search:
@@ -75,11 +75,21 @@ Temporal fields on nodes: `restrict_start_date`, `restrict_end_date`, `restrict_
   - `Text2Cypher_Expert` — last-resort NL-to-Cypher via `GraphCypherQAChain`.
   - `Legislation_By_URI`, `Hierarchy_Path_Resolver`, `Citation_Counts`, `Semantic_Search`.
 
-`stream_agent_answer()` streams the LangGraph agent and collects tool trace events displayed in Streamlit expanders.
+`stream_agent_answer()` streams the LangGraph agent, collects tool trace events, and returns `(answer, tool_events)` — this 2-tuple must be preserved as `eval_run.py` unpacks it.
 
 ### Sidebar Views
 
-The sidebar offers 9 views besides Chat: full schema graph, legislation hierarchy, parts/commentaries/schedules drill-downs, supersedes network, point-in-time split view, and temporal diff (Added/Removed/Restricted paragraphs between two dates with an Altair timeline chart).
+10 views: Chat Interface, Architecture (3 Mermaid diagrams), Tools (agent tool catalog with schema inspector), Request Trace (waterfall timeline with LLM token counts and chain-of-thought), Evaluation (golden set browser + runner), The Complete Graph, Legislation Graph, Parts, Commentaries, Supersedes/Superseded By.
+
+### System Prompt
+
+Danish-language prompt (`app.py` ~line 920–945). Key rules:
+- Quote amounts verbatim from graph; never hardcode specific indexed amounts
+- For PSL § 20 regulated amounts: always search the graph for the reguleringstabel
+- KSL § 48 E–F (forskerordning): always mention 27% rate and the 7-year period
+- FRAVALG: explicitly state "der betales ikke [skattenavn]" when a tax doesn't apply
+- FORMUESKAT: afskaffet i 1997 — state this explicitly
+- Use `Contextual_Text_Retriever` with content descriptions, not paragraph references
 
 ## Key Cypher Patterns
 
@@ -90,3 +100,5 @@ Point-in-time filter pattern:
 WHERE coalesce(n.restrict_start_date, date('0001-01-01')) <= date($cutoff_date)
   AND (n.restrict_end_date IS NULL OR n.restrict_end_date >= date($cutoff_date))
 ```
+
+ELI URI format for Danish legislation: `https://www.retsinformation.dk/eli/lta/{year}/{number}` (e.g. `eli/lta/2024/460` for KSL 2024).

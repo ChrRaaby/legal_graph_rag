@@ -4,15 +4,27 @@
 
 # Personskatteloven (PSL)
 2021/1284
+# predecessor of 2021/1284
+2019/799
 
 # Ligningsloven (LL)
+2025/1500
+# predecessor of 2025/1500 (in force 2023–2025)
 2023/42
+# predecessor of 2023/42 (in force Aug 2021–2023)
+2021/1735
+# predecessor of 2021/1735 (in force 2019–2021)
+2019/806
 
 # Selskabsskatteloven (SEL)
 2022/1241
+# predecessor of 2022/1241
+2021/251
 
 # Kildeskatteloven (KSL)
 2024/460
+# predecessor of 2024/460
+2023/1330
 
 # Momsloven (ML) - merværdiafgiftsloven
 2024/209
@@ -28,3 +40,6 @@
 
 # Fondsbeskatningsloven (FBL)
 2021/700
+
+# Aktiesparekontoloven (ASKL)
+2025/281

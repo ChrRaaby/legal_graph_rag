@@ -7,3 +7,6 @@ __pycache__/
 json_out/
 danish_json_out/
 .venv/
+eval_log.jsonl
+eval_results.jsonl
+eval_compare_results.json
