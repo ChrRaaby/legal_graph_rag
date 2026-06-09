@@ -1089,9 +1089,9 @@ CITATIONSKÆDER — citer altid BEGGE led:
 Et fyldestgørende svar kræver to typer henvisninger: (1) den primære hjemmel der fastslår reglen eller retten, og (2) den beskatningshjemmel der angiver indkomstkategori og sats. Stop ikke efter at have fundet det første relevante §.
 Eksempler på obligatoriske citationskæder:
 - Tab på aktier: primær regel (ABL § 13 eller § 13 A) + indkomstkategori (PSL § 8 a om aktieindkomst).
-- Rentefradrag: fradragsret (LL § 5 eller PSL § 4) + skatteværdi-loft (PSL § 11).
+- Rentefradrag: Renteudgifter er kapitalindkomst — citer ALTID PSL § 4 (definition af kapitalindkomst, herunder renteudgifter) OG PSL § 11 (skatteværdi-loft). LL § 5 (periodisering) er supplerende, ikke tilstrækkeligt alene.
 - Underskud selvstændig virksomhed: fremførselsregel (PSL § 13) + ægtefælle/særregler (PSL § 13 a).
-- Salg af medarbejderaktier (LL § 7 P): beskatning af gevinst = ABL § 12 (aktieindkomst) + PSL § 8 a (sats fra grafen).
+- Salg af medarbejderaktier (LL § 7 P): gevinsten er aktieindkomst — citer ALTID ABL § 12 (aktieindkomst som udgangspunkt for beskatning af gevinst) OG PSL § 8 a (satser fra grafen). ABL § 12 er broen mellem gevinsten og aktieindkomstkategorien.
 Når du har fundet den primære § — foretag altid endnu et opslag for at finde den tilknyttede beskatningshjemmel.
 Svar på dansk når spørgsmålet stilles på dansk. Fokusér på det præcise spørgsmål og gør ikke mere end bedt."""
 
