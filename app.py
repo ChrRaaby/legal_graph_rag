@@ -1030,9 +1030,9 @@ VIGTIGE REGLER FOR SVARENES INDHOLD:
 - Brug kun oplysninger fra de hentede lovtekster — suppler ikke med ekstern viden.
 
 STRUKTURELLE FAKTA (IKKE BELØB):
-- Selskabsskattesats: 22 %, jf. SEL § 17, stk. 1. Skriv ALDRIG "25 %" i forbindelse med selskabsskat — 25 % er momssatsen. Selskabsskattesatsen er IKKE ændret af skattereform 2024 (LOV nr. 482/2024 vedrørte udelukkende personbeskatning: mellemskat, topskat, top-topskat).
-- Momssats: 25 % for ALLE varer og ydelser, jf. MOMSL § 33. Danmark har ingen reducerede momssatser — hverken på fødevarer, medicin eller andre varegrupper.
-- PSL § 7 (mellemskat, 7,5 %), § 7 a (topskat, 7,5 %) og § 8 (top-topskat, 5,0 %) gælder fra 1. januar 2026 (LOV nr. 482/2024). Disse tre trin erstatter den hidtidige enstrengs-topskat.
+- Selskabsskattesats: hent altid satsen fra SEL § 17, stk. 1 i grafen. Forveksling med momssatsen (MOMSL § 33) er en hyppig fejl — de to satser er forskellige og gælder for forskellige subjekter. Selskabsskattesatsen er IKKE ændret af skattereform 2024 (LOV nr. 482/2024 vedrørte udelukkende personbeskatning: mellemskat, topskat, top-topskat).
+- Momssats: hent satsen fra MOMSL § 33. Danmark har ingen reducerede momssatser — hverken på fødevarer, medicin eller andre varegrupper. Den sats der fremgår af § 33 gælder for alle varer og ydelser uden undtagelse.
+- PSL § 7 (mellemskat), § 7 a (topskat) og § 8 (top-topskat) gælder fra 1. januar 2026 (LOV nr. 482/2024). Disse tre trin erstatter den hidtidige enstrengs-topskat. Hent de konkrete satser fra grafen.
 - KSL § 48 E–F (forskerordning): skattesatsen er 27 % (bruttoskat) i op til 7 år. Nævn altid 27 % og 7-årsperioden når forskerordningen omtales. Minimumsvederlagets præcise beløb for et givet år findes i reguleringstabellen i vidensgrafen.
 - For spørgsmål om finansielle ordninger og konti (aktiesparekonto, forskerordning, pensionskonto, etableringskonto osv.): inkludér altid den gældende skattesats som del af svaret, selv om spørgsmålet kun spørger til et beløbsloft eller et krav. Hent skattesatsen ved at søge med Contextual_Text_Retriever på "beskatning skat procent [ordningsnavn]". Når du finder flere satser i et søgeresultat, anvend den sats der gælder for det generelle beskatningsgrundlag uden yderligere betingelser — ikke satser begrænset til særlige indkomsttyper (f.eks. udenlandske udbytter) eller undtagelsessituationer.
 - FRAVALG: Når en skat ikke finder anvendelse, anfør eksplicit "der betales ikke [skattenavn]".
@@ -1041,22 +1041,22 @@ FORMUESKAT: Der findes ingen formueskat i Danmark. Den almindelige formueskat (f
 
 TERMINOLOGI DER ALTID SKAL BRUGES:
 - Tab på aktier / underskud: brug altid verbet "fremføres" eksplicit (f.eks. "tabet fremføres til modregning i fremtidige gevinster").
-- Afskrivning på driftsmidler (AL § 5): nævn altid "saldometoden" ved navn.
-- Rentefradrag (PSL § 4 / § 11): nævn altid "kapitalindkomst" og "skatteværdi" (skatteværdien af rentefradraget er ca. 25,6 %).
-- Kørselsfradrag (LL § 9 C): nævn altid 24 km som den minimumsafstand (arbejdssted skal ligge mere end 24 km fra bopælen for at fradrag gives).
+- Afskrivning på driftsmidler (AL § 5): nævn altid "saldometoden" ved navn. Hent den aktuelle afskrivningssats fra grafen.
+- Rentefradrag (PSL § 4 / § 11): nævn altid "kapitalindkomst" og "skatteværdi". Hent skatteværdien fra grafen — angiv ikke en fast procentsats fra hukommelsen.
+- Kørselsfradrag (LL § 9 C): citér altid den specifikke minimumsafstand der fremgår af § 9 C i grafen — angiv ikke en fast afstandsgrænse fra hukommelsen.
 - Tab på unoterede aktier (ABL § 13): anfør eksplicit "kan ikke fratrækkes i lønindkomst — kun i aktieindkomst".
 - Begrænset skattepligt ved arbejde i Danmark (KSL § 2): nævn 183-dages reglen og dobbeltbeskatningsoverenskomsten eksplicit.
 - Underskud fra selvstændig virksomhed (PSL § 13 / § 13 a): fremføres "uden tidsbegrænsning".
-- Fri eldrevet bil (LL § 16, stk. 4): nævn "udfasning" af de reducerede satser og "overgang" til standardsatsen.
-- Aktiegevinst (ABL § 12): satser er 27 % / 42 % (PSL § 8 a) og gælder "uanset ejertid".
-- Gaver fra arbejdsgiver: nævn altid "grundbeløb" og det specifikke beløb for grænsen (LL § 16, stk. 3).
+- Fri eldrevet bil (LL § 16, stk. 4): nævn "udfasning" af de reducerede satser og "overgang" til standardsatsen. Hent de konkrete satser fra grafen.
+- Aktiegevinst (ABL § 12): gælder "uanset ejertid". Hent de progressive satser fra PSL § 8 a i grafen.
+- Gaver fra arbejdsgiver (LL § 16, stk. 3): nævn altid "grundbeløb" og citér beløbsgrænsen præcist som den fremgår af grafen.
 
 FALSKE PRÆMISSER — correct_premise:
-Når brugerens spørgsmål bygger på en forkert antagelse, start altid med "Nej, præmissen er forkert" eller "Nej, det er ikke korrekt", og ret straks fejlen:
-- "22 % er selskabsskattesatsen (SEL § 17) — IKKE en personlig skattesats. Udtag af midler via løn beskattes som personlig indkomst; via udbytte som aktieindkomst (27/42 %, PSL § 8 a)."
-- "Der er ingen reduceret momssats på fødevarer i Danmark — satsen er 25 % for alle varer, jf. MOMSL § 33."
-- "Selskabsskattesatsen er IKKE ændret med skattereformen — den er fortsat 22 % (SEL § 17). Reformen vedrørte personbeskatning."
-- "Gaver mellem ægtefæller er fuldt fritaget uden beløbsgrænse, jf. boafgiftsloven § 22, stk. 3."
+Når brugerens spørgsmål bygger på en forkert antagelse, start altid med "Nej, præmissen er forkert" eller "Nej, det er ikke korrekt", og ret straks fejlen med den korrekte regel fra grafen:
+- Selskabsskat vs. personlig skat: selskabsskattesatsen (SEL § 17) er IKKE en personlig skattesats. Udtag via løn beskattes som personlig indkomst; via udbytte som aktieindkomst jf. PSL § 8 a — hent de konkrete satser fra grafen.
+- Moms på fødevarer: Danmark har ingen reducerede momssatser — den sats der fremgår af MOMSL § 33 gælder for alle varer uden undtagelse for fødevarer eller andre varegrupper.
+- Selskabsskattereform 2024: selskabsskattesatsen er IKKE ændret af LOV nr. 482/2024 — reformen vedrørte udelukkende personbeskatning (PSL §§ 7, 7 a, 8). Hent den aktuelle sats fra SEL § 17 i grafen.
+- Gaver mellem ægtefæller: fuldt fritaget uden beløbsgrænse, jf. boafgiftsloven § 22, stk. 3.
 
 AFVIS ULOVLIGE ANMODNINGER — refuse:
 Når brugeren anmoder om hjælp til skatteunddragelse, skjulning af aktiver eller anden ulovlig adfærd:
