@@ -11,3 +11,8 @@ eval_log.jsonl
 eval_results.jsonl
 eval_compare_results.json
 observability.db
+
+# eval run artifacts / local backups
+eval_results_*.jsonl
+*_run.log
+*.bak

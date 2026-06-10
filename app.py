@@ -167,6 +167,152 @@ DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
 
 NETWORK_GRAPH_HEIGHT = 620
 
+
+def _parse_regulering_row(text: str) -> dict:
+    """Parse one PSL § 20 reguleringstabel row into structured fields.
+
+    Row shape: "<Lov> : — <beskrivelse> (§ X) — Grundbeløb: N kr. — 2025: M kr. — 2026: P kr."
+    Returns law, description, paragraf, grundbeløb, per-year values, and the raw row
+    (kept so the model can quote the exact wording).
+    """
+    law = ""
+    m = re.match(r"\s*([^:—]+?)\s*:", text)
+    if m:
+        law = m.group(1).strip()
+    dm = re.search(r":\s*—?\s*(.*?)\s*—\s*Grundbel[øo]b", text, re.S)
+    description = re.sub(r"\s+", " ", dm.group(1)).strip() if dm else ""
+    pm = re.search(r"\(§+\s*([0-9]+(?:\s+[A-Za-z])?)", text)
+    paragraf = re.sub(r"\s+", " ", pm.group(1)).strip() if pm else None
+    gm = re.search(r"Grundbel[øo]b:\s*([\d.,]+)", text)
+    grundbeloeb = gm.group(1) if gm else None
+    years = {ym.group(1): ym.group(2) for ym in re.finditer(r"(20\d{2}):\s*([\d.,]+)", text)}
+    return {
+        "lov": law,
+        "beskrivelse": description,
+        "paragraf": paragraf,
+        "grundbeløb": grundbeloeb,
+        "aarsvaerdier": years,
+        "raw": text.strip(),
+    }
+
+
+# Set in build_runtime() so the deterministic hallucination guard in
+# stream_agent_answer() can query the graph without changing the public
+# (agent_executor, chat_messages) signature that eval_run.py depends on.
+_RUNTIME_ANALYSIS = None
+
+
+def _verify_section_references(analysis, question: str) -> list[dict]:
+    """Deterministically verify the §-references in a question against the graph.
+
+    Only acts on questions that name BOTH a law (a word ending in 'lov'/'loven'/
+    'lovens') and a specific § — exactly the "does § X exist?" shape that invites
+    hallucination. Each § is checked against the named law across ALL its versions;
+    a § is only reported non-existent when the law IS in the graph and no Section
+    with that number exists. This direction never false-flags a real § (verified
+    against the full golden set: triggers only on the genuinely missing §§).
+
+    Returns a list of {raw, normalized, law_stem, exists, nearby} dicts.
+    """
+    if analysis is None or not question:
+        return []
+    law_iter = list(re.finditer(r"([a-zæøå]{4,}lov)(?:en|ens|s)?\b", question.lower()))
+    facts: list[dict] = []
+    seen: set[tuple[str, str]] = set()
+    for m in re.finditer(r"§+\s*(\d+(?:\s*[a-zæøåA-ZÆØÅ])?)\b", question):
+        raw = re.sub(r"\s+", " ", m.group(1).strip())
+        normalized = raw.upper()
+        law_stem = None
+        for lm in law_iter:
+            if lm.start() < m.start():
+                law_stem = lm.group(1)
+        if not law_stem or (law_stem, normalized) in seen:
+            continue
+        seen.add((law_stem, normalized))
+        rows = analysis.run_query(
+            """
+            MATCH (l:Legislation) WHERE toLower(l.title) CONTAINS $stem
+            OPTIONAL MATCH (l)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+              WHERE toUpper(trim(s.number)) = $num
+            RETURN count(DISTINCT l) AS nlaws, count(DISTINCT s) AS hits
+            """,
+            {"stem": law_stem, "num": normalized},
+        )
+        if not rows or rows[0]["nlaws"] == 0:
+            continue  # law not in graph — cannot verify, so do not flag
+        exists = rows[0]["hits"] > 0
+        nearby: list[str] = []
+        if not exists:
+            base = re.match(r"\d+", normalized).group(0)
+            nb = analysis.run_query(
+                """
+                MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+                WHERE toLower(l.title) CONTAINS $stem
+                  AND s.number =~ ('^' + $base + '( [A-Z])?$')
+                RETURN DISTINCT s.number AS num ORDER BY num
+                """,
+                {"stem": law_stem, "base": base},
+            )
+            nearby = [r["num"] for r in nb][:5]
+        facts.append(
+            {"raw": raw, "normalized": normalized, "law_stem": law_stem,
+             "exists": exists, "nearby": nearby}
+        )
+    return facts
+
+
+def _existence_preamble(facts: list[dict]) -> str:
+    """Authoritative grounding note for the model, built only when a referenced §
+    is genuinely missing. Lists the missing §§ and their existing siblings so the
+    model corrects the premise instead of inventing content."""
+    missing = [f for f in facts if not f["exists"]]
+    if not missing:
+        return ""
+    lines = ["[AUTORITATIVT GRAFOPSLAG — kontrolleret direkte i vidensgrafen, gælder forud for alt andet:"]
+    for f in facts:
+        if f["exists"]:
+            lines.append(f"- § {f['raw']} findes i {f['law_stem']}en.")
+        else:
+            alts = ", ".join(f"§ {n}" for n in f["nearby"]) if f["nearby"] else "ingen med samme nummer"
+            lines.append(
+                f"- Der findes INGEN § {f['raw']} i {f['law_stem']}en. "
+                f"Fabrikér IKKE indhold til § {f['raw']}; svar at den ikke findes og "
+                f"henvis til de faktisk eksisterende paragraffer: {alts}."
+            )
+    lines.append("]")
+    return "\n".join(lines)
+
+
+def _enforce_existence_guard(answer: str, facts: list[dict]) -> str:
+    """Deterministic post-answer guard: guarantee the non-existence of a fabricated
+    § is stated, regardless of what the (non-deterministic) model produced. If the
+    answer does not already deny a missing §, prepend an authoritative correction."""
+    missing = [f for f in facts if not f["exists"]]
+    if not missing:
+        return answer
+    low = answer.lower()
+    corrections = []
+    for f in missing:
+        raw_low = f["raw"].lower()
+        already = (
+            f"ingen § {raw_low}" in low
+            or f"§ {raw_low} findes ikke" in low
+            or f"§ {raw_low} eksisterer ikke" in low
+            or f"findes ingen § {raw_low}" in low
+        )
+        if already:
+            continue
+        alts = ", ".join(f"§ {n}" for n in f["nearby"]) if f["nearby"] else ""
+        alt_txt = f" De relevante eksisterende paragraffer er {alts}." if alts else ""
+        corrections.append(
+            f"Der findes ingen § {f['raw']} i {f['law_stem']}en "
+            f"(kontrolleret direkte i vidensgrafen).{alt_txt}"
+        )
+    if not corrections:
+        return answer
+    return "\n\n".join(corrections) + "\n\n" + answer
+
+
 @st.cache_resource(show_spinner=False)
 def build_runtime(provider: str | None = None):
     if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
@@ -186,6 +332,8 @@ def build_runtime(provider: str | None = None):
         raise RuntimeError("Set LLM_PROVIDER (or OLLAMA_MODEL / GOOGLE_API_KEY / OPENAI_API_KEY) in your environment.")
 
     analysis = Neo4jAnalysis(NEO4J_URI, NEO4J_USER, NEO4J_PASSWORD, NEO4J_DATABASE)
+    global _RUNTIME_ANALYSIS
+    _RUNTIME_ANALYSIS = analysis
 
     graph = Neo4jGraph(
         url=NEO4J_URI,
@@ -198,7 +346,9 @@ def build_runtime(provider: str | None = None):
         if not OLLAMA_MODEL:
             raise RuntimeError("LLM_PROVIDER=ollama but OLLAMA_MODEL is not set.")
         from langchain_ollama import ChatOllama
-        llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0)
+        # seed pins token sampling so eval runs are reproducible (temperature=0
+        # alone is not deterministic in Ollama without a fixed seed).
+        llm = ChatOllama(model=OLLAMA_MODEL, base_url=OLLAMA_BASE_URL, temperature=0, seed=0)
     elif _provider.startswith("gemini"):
         if not GOOGLE_API_KEY:
             raise RuntimeError("LLM_PROVIDER=gemini but GOOGLE_API_KEY is not set.")
@@ -933,6 +1083,56 @@ Question: {question}""",
     def text2cypher_expert_structured(question: str):
         return cypher_chain.invoke({"query": question})
 
+    class ReguleringTableLookupInput(BaseModel):
+        q: str = Field(
+            ...,
+            description=(
+                "Emneord for det indekserede beløb, f.eks. 'minimumsløn forskerordning', "
+                "'mellemskattegrænse', 'progressionsgrænse aktieindkomst', 'bagatelgrænse "
+                "personalegoder'. Brug beskrivende ord — ikke paragrafhenvisninger."
+            ),
+        )
+        year: str | None = Field(
+            default=None,
+            description="Ønsket år, f.eks. '2025' eller '2026'. Udelad for at få alle tilgængelige år.",
+        )
+        limit: int = Field(default=8, ge=1, le=30, description="Maks antal tabelrækker.")
+
+    def regulering_table_lookup_structured(q: str, year: str | None = None, limit: int = 8):
+        """Deterministic lookup in the PSL § 20 reguleringstabel (indexed amounts).
+
+        The table is stored as flat Text rows of the form
+        "<Lov> : — <beskrivelse> (§ X) — Grundbeløb: N kr. — 2025: M kr. — 2026: P kr."
+        We lexically score rows against the query tokens and return parsed
+        grundbeløb + per-year values, so year-specific amounts are read straight
+        from the table instead of being recomputed from base × reguleringsfaktor.
+        """
+        tokens = [t for t in re.split(r"[^0-9a-zæøåA-ZÆØÅ]+", q.lower()) if len(t) > 2]
+        if not tokens:
+            return []
+        rows = analysis.run_query(
+            """
+            MATCH (t:Text)
+            WHERE t.text CONTAINS 'Grundbeløb:'
+            WITH t, toLower(t.text) AS lt
+            WITH t.text AS row, size([tok IN $tokens WHERE lt CONTAINS tok]) AS score
+            WHERE score > 0
+            RETURN row, score
+            ORDER BY score DESC
+            LIMIT $limit
+            """,
+            {"tokens": tokens, "limit": limit},
+        )
+        results = []
+        for r in rows:
+            parsed = _parse_regulering_row(r["row"])
+            parsed["match_score"] = r["score"]
+            if year:
+                parsed["forespurgt_aar"] = year
+                parsed["forespurgt_vaerdi"] = parsed.get("aarsvaerdier", {}).get(year)
+            results.append(parsed)
+        return results
+
     graph_schema_tool = Tool(
         name="Graph_Schema_Navigator",
         func=schema_navigation,
@@ -1004,12 +1204,27 @@ Question: {question}""",
         args_schema=CitationCountsInput,
         description="Fast citation metrics for one legislation (by `uri` or `q`). Returns inbound/outbound LINKED_TO counts and sample top linked titles; use for quick influence/connectedness summaries.",
     )
+    regulering_table_tool = StructuredTool.from_function(
+        name="Regulering_Table_Lookup",
+        func=regulering_table_lookup_structured,
+        args_schema=ReguleringTableLookupInput,
+        description=(
+            "Deterministisk opslag i Skatteministeriets PSL § 20 reguleringstabel for "
+            "indekserede beløbsgrænser og bundfradrag. BRUG ALTID dette værktøj, når brugeren "
+            "spørger om et konkret beløb for et bestemt år (f.eks. minimumslønkravet for "
+            "forskerordningen, mellemskattegrænsen, progressionsgrænsen for aktieindkomst, "
+            "bagatelgrænsen for personalegoder). Returnerer grundbeløb og de årsregulerede "
+            "værdier for hvert år direkte fra tabellen — citér værdien ordret i stedet for at "
+            "genberegne den fra grundbeløb og reguleringsfaktor."
+        ),
+    )
 
     tools = [
         graph_schema_tool,
         legislation_title_resolver_tool,
         legislation_finder_tool,
         text_context_tool,
+        regulering_table_tool,
         citation_tool,
         supersedes_tool,
         superseded_tool,
@@ -1025,7 +1240,7 @@ Question: {question}""",
 
 VIGTIGE REGLER FOR SVARENES INDHOLD:
 - Citér altid specifikke beløb, satser og grænser præcist som de fremgår af lovteksten — inklusive grundbeløb og årsangivelse (f.eks. "48.300 kr. (2010-niveau)").
-- For år-specifikke spørgsmål om indekserede beløb (f.eks. "hvad er beløbet i 2025"): søg altid i vidensgrafen efter "beløbsgrænser personskattelovens § 20 2025 2026" eller "PSL § 20 reguleringstabel" — vidensgrafen indeholder Skatteministeriets reguleringstabel med indekserede beløb for 2025 og 2026 for alle PSL § 20-regulerede bestemmelser.
+- For år-specifikke spørgsmål om indekserede beløb (f.eks. "hvad er beløbet i 2025"): brug værktøjet Regulering_Table_Lookup med et emneord og året. Det returnerer den årsregulerede værdi direkte fra Skatteministeriets reguleringstabel. Citér værdien ordret — genberegn den ALDRIG selv fra grundbeløb og reguleringsfaktor.
 - Anfør altid den konkrete paragraf og stykke (f.eks. "§ 16, stk. 4") i svaret.
 - Brug kun oplysninger fra de hentede lovtekster — suppler ikke med ekstern viden.
 
@@ -1149,6 +1364,22 @@ def stream_agent_answer(
         if role in {"user", "assistant"} and isinstance(content, str) and content.strip():
             lc_messages.append((role, content))
 
+    # Deterministic hallucination guard: verify any §-references in the latest
+    # question against the graph. If a referenced § does not exist, ground the
+    # model with an authoritative note (pre-injection) and enforce the correction
+    # on the output (post-check) — so the non-existence is stated regardless of
+    # the model's run-to-run non-determinism.
+    _question = next(
+        (c for r, c in reversed(lc_messages) if r == "user"), ""
+    )
+    _section_facts = _verify_section_references(_RUNTIME_ANALYSIS, _question)
+    _preamble = _existence_preamble(_section_facts)
+    if _preamble and lc_messages:
+        for _i in range(len(lc_messages) - 1, -1, -1):
+            if lc_messages[_i][0] == "user":
+                lc_messages[_i] = ("user", _preamble + "\n\n" + lc_messages[_i][1])
+                break
+
     for event in agent_executor.stream(
         {"messages": lc_messages},
         stream_mode="updates",
@@ -1254,6 +1485,7 @@ def stream_agent_answer(
                 if text:
                     final_answer = text
 
+    final_answer = _enforce_existence_guard(final_answer, _section_facts)
     return final_answer, tool_events
 
 
