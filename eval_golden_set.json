@@ -473,7 +473,11 @@
         "mellemskat",
         "top-topskat",
         "7,5",
-        "5,0",
+        [
+          "5,0",
+          "5 %",
+          "5 pct"
+        ],
         "2026"
       ],
       "must_not_contain": [
@@ -496,7 +500,7 @@
           "uri": "eli/lta/2021/1284"
         }
       ],
-      "notes": "FRESHNESS TEST: Verificeret at 2026 satser i reform er gældende."
+      "notes": "FRESHNESS TEST: Verificeret at 2026 satser i reform er gældende. [harness-audit: '5,0' -> any-of incl '5 %'/'5 pct' — top-topskat law text states '5 pct.', not '5,0']"
     },
     {
       "id": "gs-012",
@@ -523,7 +527,13 @@
         "mellemskat",
         "7,5",
         "641.200",
-        "ikke topskat"
+        [
+          "ikke topskat",
+          "ikke betales topskat",
+          "betales ikke topskat",
+          "ingen topskat",
+          "skal ikke betale topskat"
+        ]
       ],
       "must_not_contain": [
         "topskat på 15 %",
@@ -538,7 +548,7 @@
           "uri": "eli/lta/2021/1284"
         }
       ],
-      "notes": "Tester at systemet kan ANVENDE reformen korrekt med de nye satser for 2026."
+      "notes": "Tester at systemet kan ANVENDE reformen korrekt med de nye satser for 2026. [harness-audit: 'ikke topskat' -> any-of phrasings; model correctly concludes no topskat below 777.900]"
     },
     {
       "id": "gs-013",

@@ -1133,6 +1133,56 @@ Question: {question}""",
             results.append(parsed)
         return results
 
+    class SkattesatsOpslagInput(BaseModel):
+        emne: str = Field(
+            ...,
+            description=(
+                "Emneord for den skattesats du søger, f.eks. 'mellemskat topskat 2026', "
+                "'aktiesparekonto beskatning', 'selskabsskat'. Brug beskrivende ord."
+            ),
+        )
+        limit: int = Field(default=10, ge=1, le=25, description="Maks antal satsuddrag.")
+
+    def skattesats_opslag_structured(emne: str, limit: int = 10):
+        """Retrieve law-text excerpts that state a tax RATE (percentage).
+
+        Percentage-bearing provisions (e.g. the LOV 482/2024 redefinition of the
+        income-tax tiers, or a tax rate in a specific act) are often buried in long
+        amendment paragraphs that plain vector search ranks below the
+        reguleringstabel rows. This tool lexically targets Text nodes that both
+        match the topic AND contain a percentage, then returns the percentage-bearing
+        excerpts with their law title and § (read inline). It is a retrieval aid, not
+        an oracle: several rates (including superseded ones) may be returned — read
+        the context and apply the one that is in force for the asked year.
+        """
+        tokens = [t for t in re.split(r"[^0-9a-zæøåA-ZÆØÅ]+", emne.lower()) if len(t) > 2]
+        if not tokens:
+            return []
+        rows = analysis.run_query(
+            """
+            MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*1..7]->(t:Text)
+            WITH l, t, toLower(t.text) AS lt
+            WITH l, t, size([tok IN $tokens WHERE lt CONTAINS tok]) AS score
+            WHERE (lt CONTAINS 'pct' OR t.text CONTAINS '%') AND score > 0
+            RETURN l.title AS lov, t.text AS txt, score
+            ORDER BY score DESC LIMIT 6
+            """,
+            {"tokens": tokens},
+        )
+        snip_re = re.compile(r".{0,90}\d+(?:,\d+)?\s*(?:pct\.|%).{0,50}")
+        out: list[dict] = []
+        seen: set[str] = set()
+        for r in rows:
+            for m in snip_re.finditer(r["txt"]):
+                w = re.sub(r"\s+", " ", m.group(0)).strip()
+                if w in seen or not ("pct" in w.lower() or "%" in w):
+                    continue
+                seen.add(w)
+                out.append({"lov": r["lov"], "match_score": r["score"], "uddrag": w})
+                if len(out) >= limit:
+                    return out
+        return out
+
     graph_schema_tool = Tool(
         name="Graph_Schema_Navigator",
         func=schema_navigation,
@@ -1218,6 +1268,19 @@ Question: {question}""",
             "genberegne den fra grundbeløb og reguleringsfaktor."
         ),
     )
+    skattesats_tool = StructuredTool.from_function(
+        name="Skattesats_Opslag",
+        func=skattesats_opslag_structured,
+        args_schema=SkattesatsOpslagInput,
+        description=(
+            "Find lovtekst-uddrag der angiver en SKATTESATS (procent). Brug dette når brugeren "
+            "spørger om en sats/procent (f.eks. mellemskat, topskat, top-topskat, beskatningsprocenten "
+            "for en aktiesparekonto) — disse satser ligger ofte begravet i lange ændringslove som den "
+            "almindelige tekstsøgning rangerer lavt. Returnerer de procentbærende uddrag med lov og §. "
+            "Det er en søgehjælp, ikke et orakel: flere satser (også ophævede) kan optræde — læs "
+            "konteksten og anvend den sats der gælder for det spurgte år."
+        ),
+    )
 
     tools = [
         graph_schema_tool,
@@ -1225,6 +1288,7 @@ Question: {question}""",
         legislation_finder_tool,
         text_context_tool,
         regulering_table_tool,
+        skattesats_tool,
         citation_tool,
         supersedes_tool,
         superseded_tool,
@@ -1241,6 +1305,7 @@ Question: {question}""",
 VIGTIGE REGLER FOR SVARENES INDHOLD:
 - Citér altid specifikke beløb, satser og grænser præcist som de fremgår af lovteksten — inklusive grundbeløb og årsangivelse (f.eks. "48.300 kr. (2010-niveau)").
 - For år-specifikke spørgsmål om indekserede beløb (f.eks. "hvad er beløbet i 2025"): brug værktøjet Regulering_Table_Lookup med et emneord og året. Det returnerer den årsregulerede værdi direkte fra Skatteministeriets reguleringstabel. Citér værdien ordret — genberegn den ALDRIG selv fra grundbeløb og reguleringsfaktor.
+- For spørgsmål om en skattesats/procent (f.eks. mellemskat, topskat, top-topskat, en kontos beskatningsprocent): brug værktøjet Skattesats_Opslag. Vær opmærksom på at satser kan være ændret af nyere love (f.eks. blev topskattens struktur ændret fra 2026) — læs konteksten i uddragene og anvend den sats der gælder for det spurgte år.
 - Anfør altid den konkrete paragraf og stykke (f.eks. "§ 16, stk. 4") i svaret.
 - Brug kun oplysninger fra de hentede lovtekster — suppler ikke med ekstern viden.
 
