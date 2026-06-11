@@ -160,8 +160,21 @@ def _is_quota_error(exc: Exception) -> bool:
     return "429" in msg or "RESOURCE_EXHAUSTED" in msg or "QUOTA" in msg
 
 
+def _is_connection_error(exc: Exception) -> bool:
+    """Transient Neo4j/network drop mid-run (the flaky Aura free instance drops
+    connections inside LangChain-managed sessions that bypass Neo4jAnalysis'
+    own retry). Retrying the whole agent call almost always recovers."""
+    msg = str(exc).lower()
+    return any(s in msg for s in (
+        "defunct connection", "failed to read from", "service unavailable",
+        "session expired", "connection refused", "unable to retrieve routing",
+        "timed out", "connection reset",
+    ))
+
+
 def _stream_with_retry(agent_executor, chat_messages, retries: int = 4) -> tuple:
-    """Call stream_agent_answer with exponential backoff on 429 quota errors."""
+    """Call stream_agent_answer, retrying transient quota (429) and Neo4j/network
+    connection drops so they don't corrupt an item's result."""
     delay = 15.0
     for attempt in range(retries):
         try:
@@ -171,6 +184,9 @@ def _stream_with_retry(agent_executor, chat_messages, retries: int = 4) -> tuple
                 wait = delay * (2 ** attempt)
                 print(f"         [quota 429 — retrying in {wait:.0f}s]", flush=True)
                 time.sleep(wait)
+            elif _is_connection_error(exc) and attempt < retries - 1:
+                print(f"         [neo4j connection drop — retrying in 5s]", flush=True)
+                time.sleep(5)
             else:
                 raise
 
