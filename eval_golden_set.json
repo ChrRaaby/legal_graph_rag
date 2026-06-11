@@ -1064,27 +1064,38 @@
       "tags": [
         "hovedaktionær",
         "maskeret_udlodning",
-        "rette_indkomstmodtager",
+        "armslængde",
         "graph_chain"
       ],
-      "question": "Jeg er hovedaktionær i mit eget selskab og udtager både løn og udbytte. Hvilke regler om rette indkomstmodtager og maskeret udlodning skal jeg være opmærksom på hvis jeg udtager mere end markedslønnen?",
+      "question": "Jeg er hovedaktionær i mit eget selskab og udtager både løn og udbytte. Hvilke regler om armslængde og maskeret udlodning skal jeg være opmærksom på, hvis jeg udtager mere end markedslønnen, og hvordan beskattes et eventuelt omklassificeret beløb?",
       "temporal_constraint": null,
       "expected_behavior": "answer",
       "expected_reasoning_steps": [
         "Identify the user relationship: principal shareholder (hovedaktionær).",
         "Chain Step 1: Retrieve the arm's length principle from LL § 2.",
-        "Chain Step 2: Retrieve the rule on disguised dividends (maskeret udlodning) from LL § 16 A for excessive salary.",
-        "Chain Step 3: Connect this to the fundamental right-income-recipient doctrine in SL § 4.",
-        "Synthesize how exceeding market rates triggers reclassification of income."
+        "Chain Step 2: Retrieve the disguised-dividend rule (maskeret udlodning) from LL § 16 A for excessive salary.",
+        "Chain Step 3: Connect the reclassified amount to aktieindkomst taxation in PSL § 8 a.",
+        "Synthesize how exceeding the market rate reclassifies the excess as dividend taxed as aktieindkomst."
       ],
-      "expected_answer": "Som hovedaktionær er du underlagt armslængdeprincippet for transaktioner med eget selskab efter ligningslovens § 2. Hvis du udtager beløb der overstiger markedslønnen, kan SKAT omklassificere det overskydende beløb som maskeret udlodning efter ligningslovens § 16 A og statsskattelovens § 4 — beskattet som aktieindkomst. Dokumentér markedslønnen.",
+      "expected_answer": "Som hovedaktionær er du underlagt armslængdeprincippet for transaktioner med eget selskab efter ligningslovens § 2. Udtager du mere end markedslønnen, kan SKAT omklassificere det overskydende beløb til maskeret udlodning (udbytte) efter ligningslovens § 16 A. Det omklassificerede beløb beskattes som aktieindkomst efter personskattelovens § 8 a (27 %/42 %). Dokumentér markedslønnen.",
       "must_contain": [
         "§ 2",
         "ligningsloven",
         "§ 16 A",
-        "maskeret udlodning",
-        "armslængde",
-        "statsskatteloven"
+        [
+          "maskeret udlodning",
+          "maskeret udbytte",
+          "omklassific"
+        ],
+        [
+          "armslængde",
+          "markedsløn",
+          "markedsvilkår"
+        ],
+        [
+          "aktieindkomst",
+          "§ 8 a"
+        ]
       ],
       "must_not_contain": [
         "frit valg",
@@ -1106,14 +1117,14 @@
           "uri": "eli/lta/2023/42"
         },
         {
-          "lov": "SL",
-          "paragraf": "4",
+          "lov": "PSL",
+          "paragraf": "8 a",
           "stk": null,
           "nr": null,
-          "uri": null
+          "uri": "eli/lta/2021/1284"
         }
       ],
-      "notes": "PRIMARY GRAPH TEST: kræver at trajectory chainer mindst 3 love (LL § 2, LL § 16 A, SL § 4)."
+      "notes": "PRIMARY GRAPH TEST: kræver at trajectory chainer 3 love der ALLE er i grafen (LL § 2, LL § 16 A, PSL § 8 a). [scope-change 2026-06: statsskatteloven kan ikke loades — retsinformation har ingen struktureret tekst for 1922-loven — så SL § 4 / 'statsskatteloven' er fjernet og kæden er omlagt til beskatningshjemlen PSL § 8 a.]"
     },
     {
       "id": "gs-025",
