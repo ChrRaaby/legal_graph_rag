@@ -410,6 +410,41 @@ def print_summary(results: list[dict]) -> None:
     print()
 
 
+def print_repeat_summary(per_run_pass: list[int], pass_counts: dict[str, int],
+                         repeat: int, items: list[dict]) -> None:
+    """Aggregate report across N runs: mean/range/stdev and per-item pass-frequency.
+
+    The per-item frequency is the point — it separates stable behavior from the
+    agent's run-to-run non-determinism. FLAKY items (0 < freq < N) are the
+    robustness targets; ALWAYS/NEVER are stable signal.
+    """
+    import statistics
+    total = len(items)
+    mean = statistics.mean(per_run_pass)
+    stdev = statistics.pstdev(per_run_pass) if len(per_run_pass) > 1 else 0.0
+
+    print(f"\n{'='*64}")
+    print(f"MULTIRUN SUMMARY  —  {repeat} runs × {total} items")
+    print(f"{'='*64}")
+    print(f"Per-run pass counts: {per_run_pass}")
+    print(f"Mean: {mean:.1f}/{total}  ({100*mean/total:.0f}%)   "
+          f"range {min(per_run_pass)}–{max(per_run_pass)}   stdev {stdev:.2f}\n")
+
+    freq = {it["id"]: pass_counts.get(it["id"], 0) for it in items}
+    id_q = {it["id"]: it["question"] for it in items}
+    always = sorted(i for i, c in freq.items() if c == repeat)
+    never = sorted(i for i, c in freq.items() if c == 0)
+    flaky = sorted(((i, c) for i, c in freq.items() if 0 < c < repeat),
+                   key=lambda x: (x[1], x[0]))
+
+    print(f"ALWAYS pass ({len(always)}/{total}): {always}")
+    print(f"NEVER pass  ({len(never)}/{total}): {never}")
+    print(f"FLAKY ({len(flaky)}/{total}) — pass-frequency / {repeat} (robustness targets):")
+    for i, c in flaky:
+        print(f"   {i}: {c}/{repeat}   {id_q[i][:58]}")
+    print()
+
+
 def check_connectivity() -> bool:
     """Check Neo4j, LLM API, and embedding model before loading the full runtime.
 
@@ -517,6 +552,42 @@ def build_judge_llm():
     raise RuntimeError("No LLM configured (set OLLAMA_MODEL, GOOGLE_API_KEY, or OPENAI_API_KEY)")
 
 
+def build_runtime_with_retry(attempts: int = 4, timeout_s: int = 120):
+    """Load the agent runtime, retrying if it stalls.
+
+    The Neo4j Aura free instance intermittently hangs build_runtime() on the
+    schema-fetch / vector-store init (a silent hang, not an exception), which
+    would otherwise wedge an entire run at startup. We run the load in a daemon
+    thread and abandon+retry it if it doesn't finish within timeout_s — a fresh
+    attempt almost always reconnects cleanly.
+    """
+    last_err: Exception | None = None
+    for attempt in range(1, attempts + 1):
+        box: dict = {}
+
+        def _load():
+            try:
+                box["val"] = build_runtime()
+            except Exception as exc:  # noqa: BLE001
+                box["err"] = exc
+
+        t = threading.Thread(target=_load, daemon=True)
+        t.start()
+        t.join(timeout_s)
+        if "val" in box:
+            return box["val"]
+        if t.is_alive():
+            last_err = TimeoutError(f"build_runtime stalled >{timeout_s}s")
+            print(f"  runtime load stalled (>{timeout_s}s) — attempt {attempt}/{attempts}, retrying…",
+                  flush=True)
+        else:
+            last_err = box.get("err", RuntimeError("unknown build_runtime failure"))
+            print(f"  runtime load failed ({last_err}) — attempt {attempt}/{attempts}, retrying…",
+                  flush=True)
+        time.sleep(3)
+    raise RuntimeError(f"build_runtime failed after {attempts} attempts: {last_err}")
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(
         description="Headless evaluation of the Danish Tax Law GraphRAG agent"
@@ -572,6 +643,15 @@ def main() -> None:
         action="store_true",
         help="Re-run only items that failed in the previous --output file",
     )
+    parser.add_argument(
+        "--repeat",
+        type=int,
+        default=1,
+        metavar="N",
+        help="Run the full item set N times (runtime loaded once). Reports mean "
+             "pass rate + per-item pass-frequency to separate signal from the "
+             "agent's run-to-run non-determinism.",
+    )
     args = parser.parse_args()
 
     golden_path = Path(args.golden_set)
@@ -617,7 +697,7 @@ def main() -> None:
     print()
 
     print("Loading agent runtime…")
-    analysis, agent_executor, _tools = build_runtime()
+    analysis, agent_executor, _tools = build_runtime_with_retry()
 
     judge_llm = None
     if args.judge:
@@ -631,11 +711,13 @@ def main() -> None:
     output_path.write_text("", encoding="utf-8")
 
     workers = max(1, args.workers)
+    repeat = max(1, args.repeat)
     results: list[dict] = []
     _print_lock = threading.Lock()
     _file_lock = threading.Lock()
+    _run_state = {"idx": 1}
     total = len(items)
-    print(f"Running {total} item(s)  [workers={workers}  llm={_llm_override}]…\n")
+    print(f"Running {total} item(s) × {repeat} run(s)  [workers={workers}  llm={_llm_override}]…\n")
 
     def _run_item(indexed_item: tuple[int, dict]) -> dict:
         i, item = indexed_item
@@ -654,7 +736,8 @@ def main() -> None:
             raise RuntimeError(f"LLM quota exhausted on item {item['id']}")
 
         scores = score_item(item, answer, tool_events)
-        result: dict = {"item": item, "answer": answer, "latency_s": latency, "scores": scores}
+        result: dict = {"item": item, "answer": answer, "latency_s": latency,
+                        "scores": scores, "run_idx": _run_state["idx"]}
 
         if judge_llm is not None:
             result["judge_scores"] = llm_judge(item, answer, judge_llm)
@@ -695,20 +778,38 @@ def main() -> None:
 
         return result
 
-    indexed = list(enumerate(items, 1))
-    with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(_run_item, ix): ix for ix in indexed}
-        for future in as_completed(futures):
-            try:
-                results.append(future.result())
-            except RuntimeError as exc:
-                if "quota" in str(exc).lower():
-                    print(f"\nAbort: {exc}")
-                    pool.shutdown(wait=False, cancel_futures=True)
-                    sys.exit(1)
-                # Other errors already embedded in the result; non-fatal
+    per_run_pass: list[int] = []
+    pass_counts: dict[str, int] = defaultdict(int)
+    for run_idx in range(1, repeat + 1):
+        _run_state["idx"] = run_idx
+        if repeat > 1:
+            print(f"\n{'#'*64}\n# RUN {run_idx}/{repeat}\n{'#'*64}\n")
+        run_results: list[dict] = []
+        indexed = list(enumerate(items, 1))
+        with ThreadPoolExecutor(max_workers=workers) as pool:
+            futures = {pool.submit(_run_item, ix): ix for ix in indexed}
+            for future in as_completed(futures):
+                try:
+                    run_results.append(future.result())
+                except RuntimeError as exc:
+                    if "quota" in str(exc).lower():
+                        print(f"\nAbort: {exc}")
+                        pool.shutdown(wait=False, cancel_futures=True)
+                        sys.exit(1)
+                    # Other errors already embedded in the result; non-fatal
+        results.extend(run_results)
+        rp = sum(1 for r in run_results if r["scores"]["overall_pass"])
+        per_run_pass.append(rp)
+        for r in run_results:
+            if r["scores"]["overall_pass"]:
+                pass_counts[r["item"]["id"]] += 1
+        if repeat > 1:
+            print(f"\n>>> RUN {run_idx}/{repeat}: {rp}/{len(run_results)} passed", flush=True)
 
-    print_summary(results)
+    if repeat == 1:
+        print_summary(results)
+    else:
+        print_repeat_summary(per_run_pass, pass_counts, repeat, items)
     print(f"Results written to: {output_path}")
 
 

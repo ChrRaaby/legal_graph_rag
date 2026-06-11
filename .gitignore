@@ -16,3 +16,5 @@ observability.db
 eval_results_*.jsonl
 *_run.log
 *.bak
+eval_*.log
+overnight_*.log
