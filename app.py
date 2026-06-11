@@ -202,6 +202,39 @@ def _parse_regulering_row(text: str) -> dict:
 _RUNTIME_ANALYSIS = None
 
 
+def _is_connection_error(exc: Exception) -> bool:
+    """Transient Neo4j / network drop. The Aura free instance intermittently
+    drops pooled connections (including inside LangChain-managed sessions —
+    Neo4jVector, Neo4jGraph, GraphCypherQAChain — that bypass Neo4jAnalysis'
+    own retry), surfacing as a 'defunct connection' read timeout mid-query."""
+    msg = str(exc).lower()
+    return any(s in msg for s in (
+        "defunct connection", "failed to read from", "service unavailable",
+        "serviceunavailable", "session expired", "sessionexpired",
+        "connection refused", "unable to retrieve routing", "routing information",
+        "timed out", "connection reset", "broken pipe",
+    ))
+
+
+def _retry_on_connection(fn, retries: int = 3, delay: float = 1.5):
+    """Wrap a tool function so a transient Neo4j/network drop is retried instead
+    of failing the agent's turn. The neo4j driver evicts the dead connection on
+    the failed attempt, so the retry gets a fresh one from the pool. Non-network
+    errors propagate immediately."""
+    def _wrapped(*args, **kwargs):
+        for attempt in range(retries):
+            try:
+                return fn(*args, **kwargs)
+            except Exception as exc:
+                if _is_connection_error(exc) and attempt < retries - 1:
+                    time.sleep(delay * (attempt + 1))
+                else:
+                    raise
+    _wrapped.__name__ = getattr(fn, "__name__", "tool_fn")
+    _wrapped.__doc__ = getattr(fn, "__doc__", None)
+    return _wrapped
+
+
 def _verify_section_references(analysis, question: str) -> list[dict]:
     """Deterministically verify the §-references in a question against the graph.
 
@@ -1299,6 +1332,15 @@ Question: {question}""",
         hierarchy_path_resolver_tool,
         citation_counts_tool
     ]
+
+    # Make every tool resilient to transient Neo4j/network drops: a dropped
+    # connection inside any tool (incl. the LangChain-managed vector store /
+    # Cypher chain) is retried with a fresh connection instead of failing the
+    # agent's turn. Applied uniformly so the app and the eval both survive the
+    # Aura free instance's intermittent connection drops.
+    for _t in tools:
+        if getattr(_t, "func", None) is not None:
+            _t.func = _retry_on_connection(_t.func)
 
     system_prompt = """Du er en specialiseret dansk skattelovgivnings-AI-assistent. Vidensgrafen indeholder dansk skattelovgivning fra retsinformation.dk, herunder Personskatteloven, Ligningsloven, Selskabsskatteloven, Kildeskatteloven, Momsloven, Aktieavancebeskatningsloven, Kursgevinstloven, Afskrivningsloven, Fondsbeskatningsloven og Aktiesparekontoloven.
 
