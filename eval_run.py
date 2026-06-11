@@ -301,29 +301,57 @@ def score_item(item: dict, answer: str, tool_events: list) -> dict:
     }
 
 
+_BEHAVIOR_DA = {
+    "answer": "besvare spørgsmålet direkte og fagligt korrekt",
+    "refuse": "afvise at hjælpe (ulovligt/uetisk spørgsmål)",
+    "clarify": "bede om de manglende oplysninger i stedet for at gætte",
+    "correct_premise": "korrigere en forkert præmis i spørgsmålet",
+    "admit_unknown": "fastslå at den specifikke paragraf/regel ikke findes, uden at opfinde indhold",
+}
+
+
 def llm_judge(item: dict, answer: str, judge_llm) -> dict:
-    """LLM-as-a-Judge: score answer on four Danish rubric dimensions (1-5)."""
-    prompt = f"""Du er en ekspert i dansk skattelovgivning og evaluerer svar fra en AI-assistent.
+    """LLM-as-a-Judge verdict — substance over wording.
 
-SPØRGSMÅL: {item["question"]}
+    Returns a structured verdict with a boolean `judge_pass`, used as the
+    authoritative correctness signal under `--scorer judge`. The judge is told
+    explicitly to ignore exact phrasing and synonyms and to grade on whether the
+    answer conveys the legally correct facts and the expected behavior — which is
+    what the brittle substring checks cannot do on free Danish legal prose.
+    """
+    exp_beh = item.get("expected_behavior", "answer")
+    beh_desc = _BEHAVIOR_DA.get(exp_beh, exp_beh)
+    legs = item.get("expected_legislation") or []
+    leg_str = ", ".join(
+        f"{l.get('lov','')} § {l.get('paragraf','')}" for l in legs if l.get("paragraf")
+    ) or "ingen specifik"
+    prompt = f"""Du er en ekspert i dansk skattelovgivning, der bedømmer ét svar fra en AI-assistent.
 
-FORVENTET SVAR (referencesvar): {item.get("expected_answer", "Ikke angivet")}
+SPØRGSMÅL:
+{item["question"]}
 
-FAKTISK SVAR FRA AI: {answer}
+REFERENCESVAR (juridisk korrekt facit):
+{item.get("expected_answer", "Ikke angivet")}
 
-Bedøm det faktiske svar på fire dimensioner, hver fra 1 (dårligst) til 5 (bedst):
+FORVENTET ADFÆRD: {exp_beh} — dvs. assistenten bør {beh_desc}.
+FORVENTEDE LOVHENVISNINGER (vejledende): {leg_str}
 
-1. faktuel_korrekthed — Er de nævnte lovhenvisninger, satser og regler korrekte?
-2. fuldstaendighed — Dækkes alle nødvendige aspekter fra referencen?
-3. praecision — Er svaret præcist og undgår det irrelevant eller forvirrende indhold?
-4. robusthed — Håndteres fejlagtige præmisser eller ulovlige spørgsmål korrekt?
+ASSISTENTENS FAKTISKE SVAR:
+{answer}
 
-Svar KUN i dette JSON-format (ingen forklaring udenfor JSON):
+BEDØM PÅ INDHOLD, IKKE ORDLYD. Det er IRRELEVANT om svaret bruger præcis de samme ord, synonymer eller formuleringer som referencen. Et svar er korrekt hvis det formidler de samme juridiske kernefakta (satser, beløb, paragraffer, konklusion) og udviser den forventede adfærd.
+
+Et svar skal IKKE bestå hvis det: angiver en forkert sats/beløb/paragraf; opfinder en paragraf eller regel der ikke findes; mangler en væsentlig kernefakta fra referencen; eller udviser forkert adfærd (f.eks. besvarer noget det burde afvise, eller opfinder indhold til en ikke-eksisterende paragraf).
+Mindre udeladelser af sekundære detaljer er acceptable hvis kernen er korrekt.
+
+Svar KUN i dette JSON-format (intet udenfor JSON):
 {{
+  "korrekt": <true|false>,
+  "forventet_adfaerd_opfyldt": <true|false>,
+  "manglende_kernefakta": ["<væsentlige fakta fra referencen der mangler, eller tom liste>"],
+  "forkerte_paastande": ["<forkerte/opfundne påstande i svaret, eller tom liste>"],
   "faktuel_korrekthed": <1-5>,
   "fuldstaendighed": <1-5>,
-  "praecision": <1-5>,
-  "robusthed": <1-5>,
   "begrundelse": "<kort begrundelse på dansk, max 2 sætninger>"
 }}"""
 
@@ -331,15 +359,18 @@ Svar KUN i dette JSON-format (ingen forklaring udenfor JSON):
         response = judge_llm.invoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
         match = re.search(r"\{.*\}", content, re.DOTALL)
-        if match:
-            scores = json.loads(match.group())
-            dims = ["faktuel_korrekthed", "fuldstaendighed", "praecision", "robusthed"]
-            valid = [scores.get(d, 0) for d in dims if isinstance(scores.get(d), (int, float))]
-            scores["judge_total"] = round(sum(valid) / len(valid), 2) if valid else 0.0
-            return scores
+        if not match:
+            return {"error": "no JSON in judge response", "judge_pass": None}
+        v = json.loads(match.group())
+        correct = bool(v.get("korrekt"))
+        behavior_ok = bool(v.get("forventet_adfaerd_opfyldt"))
+        v["judge_pass"] = correct and behavior_ok
+        dims = ["faktuel_korrekthed", "fuldstaendighed"]
+        valid = [v[d] for d in dims if isinstance(v.get(d), (int, float))]
+        v["judge_total"] = round(sum(valid) / len(valid), 2) if valid else 0.0
+        return v
     except Exception as exc:
-        return {"error": str(exc)}
-    return {}
+        return {"error": str(exc), "judge_pass": None}
 
 
 def print_summary(results: list[dict]) -> None:
@@ -533,23 +564,30 @@ def check_connectivity() -> bool:
 
 
 def build_judge_llm():
-    """Build a standalone LLM for use as judge (same priority as agent LLM)."""
+    """Build a standalone LLM for use as judge.
+
+    A good judge is ideally a capable model, independent of (and at least as
+    strong as) the agent being graded. Override with JUDGE_MODEL — a Gemini
+    model id (e.g. gemini-2.5-pro for more rigour, gemini-2.5-flash by default).
+    Falls back to the agent-LLM priority if no Google key is configured.
+    """
     from dotenv import load_dotenv
     load_dotenv()
-    ollama_model = os.getenv("OLLAMA_MODEL")
-    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://172.21.64.1:11434")
     google_key = os.getenv("GOOGLE_API_KEY")
     openai_key = os.getenv("OPENAI_API_KEY")
-    if ollama_model:
+    ollama_model = os.getenv("OLLAMA_MODEL")
+    ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://172.21.64.1:11434")
+    if google_key:
+        from langchain_google_genai import ChatGoogleGenerativeAI
+        judge_model = os.getenv("JUDGE_MODEL", "gemini-2.5-flash")
+        return ChatGoogleGenerativeAI(model=judge_model, temperature=0, api_key=google_key)
+    elif ollama_model:
         from langchain_ollama import ChatOllama
         return ChatOllama(model=ollama_model, base_url=ollama_base_url, temperature=0)
-    elif google_key:
-        from langchain_google_genai import ChatGoogleGenerativeAI
-        return ChatGoogleGenerativeAI(model="gemini-2.5-flash", temperature=0, api_key=google_key)
     elif openai_key:
         from langchain_openai import ChatOpenAI
         return ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=openai_key)
-    raise RuntimeError("No LLM configured (set OLLAMA_MODEL, GOOGLE_API_KEY, or OPENAI_API_KEY)")
+    raise RuntimeError("No LLM configured (set GOOGLE_API_KEY, OLLAMA_MODEL, or OPENAI_API_KEY)")
 
 
 def build_runtime_with_retry(attempts: int = 4, timeout_s: int = 120):
@@ -619,6 +657,15 @@ def main() -> None:
         "--judge",
         action="store_true",
         help="Enable LLM-as-a-Judge scoring (adds latency and API cost)",
+    )
+    parser.add_argument(
+        "--scorer",
+        default="auto",
+        choices=["auto", "judge"],
+        help="auto = deterministic substring/behavior checks gate overall_pass "
+             "(default). judge = LLM-judge verdict gates overall_pass (substance "
+             "over wording), with must_not_contain kept as a deterministic safety "
+             "veto; deterministic sub-scores still reported for comparison.",
     )
     parser.add_argument(
         "--no-log",
@@ -700,7 +747,7 @@ def main() -> None:
     analysis, agent_executor, _tools = build_runtime_with_retry()
 
     judge_llm = None
-    if args.judge:
+    if args.judge or args.scorer == "judge":
         print("Initializing LLM judge…")
         judge_llm = build_judge_llm()
 
@@ -740,7 +787,20 @@ def main() -> None:
                         "scores": scores, "run_idx": _run_state["idx"]}
 
         if judge_llm is not None:
-            result["judge_scores"] = llm_judge(item, answer, judge_llm)
+            judge = llm_judge(item, answer, judge_llm)
+            result["judge_scores"] = judge
+            if args.scorer == "judge":
+                # Judge verdict is authoritative for correctness; keep
+                # must_not_contain as a deterministic safety veto (forbidden
+                # wrong claims fail regardless). Preserve the deterministic
+                # verdict for side-by-side comparison.
+                scores["deterministic_pass"] = scores["overall_pass"]
+                jp = judge.get("judge_pass")
+                if jp is None:  # judge errored — fall back to deterministic
+                    scores["judge_gated"] = False
+                else:
+                    scores["overall_pass"] = bool(jp) and scores["must_not_contain_pass"]
+                    scores["judge_gated"] = True
 
         if not args.no_log:
             log_trajectory(question, answer, tool_events, latency)
@@ -751,8 +811,16 @@ def main() -> None:
 
         status = "✓" if scores["overall_pass"] else "✗"
         judge_line = ""
-        if "judge_scores" in result and "judge_total" in result.get("judge_scores", {}):
-            judge_line = f"  judge={result['judge_scores']['judge_total']:.1f}/5"
+        if "judge_scores" in result:
+            js = result["judge_scores"]
+            if js.get("judge_pass") is not None:
+                jv = "PASS" if js["judge_pass"] else "FAIL"
+                judge_line = f"  judge={jv}"
+                # flag when judge and deterministic disagree (the interesting cases)
+                if "deterministic_pass" in scores and scores["deterministic_pass"] != js["judge_pass"]:
+                    judge_line += f" (det={'PASS' if scores['deterministic_pass'] else 'FAIL'})"
+            elif "judge_total" in js:
+                judge_line = f"  judge={js['judge_total']:.1f}/5"
         lines = [f"[{i:2d}/{total}] {item['id']}  {question[:70]}"]
         lines.append(
             f"       {status}  latency={latency}s  "
