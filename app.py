@@ -812,7 +812,7 @@ Question: {question}""",
                    coalesce(par.text, sec.text, sec.title) AS matched_text,
                    coalesce(leg.is_current, true) AS is_current,
                    1.0 AS vector_score
-            ORDER BY coalesce(leg.is_current, true) DESC, par.number
+            ORDER BY par.number
             LIMIT 5
             """
             _direct_rows = analysis.run_query(_direct_q, {"sec": _sec_num, "stk": _stk_num})
@@ -850,7 +850,7 @@ Question: {question}""",
                coalesce(paragraph.text, n.text, n.title, n.description) AS matched_text,
                coalesce(l.is_current, true) AS is_current,
                h.score AS vector_score
-        ORDER BY coalesce(l.is_current, true) DESC, vector_score DESC
+        ORDER BY vector_score DESC
         LIMIT $limit
         """
         rows = analysis.run_query(query, {"hits": hits, "limit": limit})
