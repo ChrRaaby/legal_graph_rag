@@ -202,6 +202,34 @@ def _parse_regulering_row(text: str) -> dict:
 _RUNTIME_ANALYSIS = None
 
 
+def _attach_kilde(rows: list) -> list:
+    """Annotate each retrieval row with a copy-paste-ready 'kilde' citation and a
+    'gyldighed' (validity) marker.
+
+    - 'kilde': a pre-formatted citation (e.g. "Aktieavancebeskatningsloven § 13 A,
+      stk. 1") the model can quote verbatim instead of composing from separate
+      fields. Built deterministically from graph data — never fabricated.
+    - 'gyldighed': whether the text is from the law version currently in force or
+      a superseded historic version (from the is_current flag set by
+      build_supersedes_edges.py). Lets the model avoid quoting repealed text — the
+      retriever already ranks current versions first."""
+    for r in rows:
+        if not isinstance(r, dict):
+            continue
+        if "is_current" in r:
+            r["gyldighed"] = "gældende" if r.get("is_current") else "historisk (ophævet version — citér ikke som gældende ret)"
+        lov = (r.get("legislation_short") or r.get("legislation_title") or "").strip()
+        sec = r.get("section_number")
+        if not (lov and sec):
+            continue
+        kilde = f"{lov} § {str(sec).strip()}"
+        par = r.get("paragraph_number")
+        if par:
+            kilde += f", stk. {str(par).strip()}"
+        r["kilde"] = kilde
+    return rows
+
+
 def _is_connection_error(exc: Exception) -> bool:
     """Transient Neo4j / network drop. The Aura free instance intermittently
     drops pooled connections (including inside LangChain-managed sessions —
@@ -774,6 +802,7 @@ Question: {question}""",
             WITH leg, sec, par
             WHERE leg IS NOT NULL
             RETURN DISTINCT leg.title AS legislation_title,
+                   leg.description AS legislation_short,
                    leg.uri AS legislation_uri,
                    leg.status AS legislation_status,
                    null AS part_number, null AS part_title,
@@ -781,8 +810,9 @@ Question: {question}""",
                    sec.number AS section_number, sec.title AS section_title,
                    par.number AS paragraph_number,
                    coalesce(par.text, sec.text, sec.title) AS matched_text,
+                   coalesce(leg.is_current, true) AS is_current,
                    1.0 AS vector_score
-            ORDER BY par.number
+            ORDER BY coalesce(leg.is_current, true) DESC, par.number
             LIMIT 5
             """
             _direct_rows = analysis.run_query(_direct_q, {"sec": _sec_num, "stk": _stk_num})
@@ -807,6 +837,7 @@ Question: {question}""",
              head([x IN nodes(p) WHERE x:Paragraph]) AS paragraph
         WHERE l IS NOT NULL
         RETURN DISTINCT l.title AS legislation_title,
+               l.description AS legislation_short,
                l.uri AS legislation_uri,
                l.status AS legislation_status,
                part.number AS part_number,
@@ -817,8 +848,9 @@ Question: {question}""",
                section.title AS section_title,
                paragraph.number AS paragraph_number,
                coalesce(paragraph.text, n.text, n.title, n.description) AS matched_text,
+               coalesce(l.is_current, true) AS is_current,
                h.score AS vector_score
-        ORDER BY vector_score DESC
+        ORDER BY coalesce(l.is_current, true) DESC, vector_score DESC
         LIMIT $limit
         """
         rows = analysis.run_query(query, {"hits": hits, "limit": limit})
@@ -865,7 +897,7 @@ Question: {question}""",
                     parts.append(f"[{yr}:] " + " ".join(by_year[yr]))
                 row["matched_text"] = "\n".join(parts)
 
-        return rows
+        return _attach_kilde(rows)
 
     class ContextualTextRetrieverInput(BaseModel):
         q: str = Field(..., description="Natural language legal query.")
