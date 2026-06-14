@@ -897,6 +897,38 @@ Question: {question}""",
                     parts.append(f"[{yr}:] " + " ".join(by_year[yr]))
                 row["matched_text"] = "\n".join(parts)
 
+        # Attach 'krydshenvisninger': the §§ each retrieved provision explicitly
+        # cross-references (CITES edges parsed from the law text by
+        # build_cites_edges.py), as ready citations — hands the agent the next
+        # link in a multi-law chain. Pure additive data; no prompt change.
+        _pairs = list({
+            (r["legislation_short"], str(r["section_number"]).strip().upper())
+            for r in rows
+            if isinstance(r, dict) and r.get("legislation_short") and r.get("section_number")
+        })
+        if _pairs:
+            _cmap = {}
+            for _r in analysis.run_query(
+                """
+                UNWIND $pairs AS pr
+                MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+                WHERE coalesce(l.is_current, true) AND l.description = pr[0]
+                  AND toUpper(trim(s.number)) = pr[1]
+                MATCH (s)-[:CITES]->(t:Section)<-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]-(tl:Legislation)
+                WHERE coalesce(tl.is_current, true)
+                RETURN pr[0] AS lov, pr[1] AS sec,
+                       collect(DISTINCT tl.description + ' § ' + t.number)[0..12] AS cites
+                """,
+                {"pairs": [list(p) for p in _pairs]},
+            ):
+                _cmap[(_r["lov"], _r["sec"])] = _r["cites"]
+            for r in rows:
+                if not isinstance(r, dict):
+                    continue
+                key = (r.get("legislation_short"), str(r.get("section_number")).strip().upper())
+                if _cmap.get(key):
+                    r["krydshenvisninger"] = _cmap[key]
+
         return _attach_kilde(rows)
 
     class ContextualTextRetrieverInput(BaseModel):
