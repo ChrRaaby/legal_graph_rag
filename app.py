@@ -802,7 +802,6 @@ Question: {question}""",
             WITH leg, sec, par
             WHERE leg IS NOT NULL
             RETURN DISTINCT leg.title AS legislation_title,
-                   leg.description AS legislation_short,
                    leg.uri AS legislation_uri,
                    leg.status AS legislation_status,
                    null AS part_number, null AS part_title,
@@ -810,7 +809,6 @@ Question: {question}""",
                    sec.number AS section_number, sec.title AS section_title,
                    par.number AS paragraph_number,
                    coalesce(par.text, sec.text, sec.title) AS matched_text,
-                   coalesce(leg.is_current, true) AS is_current,
                    1.0 AS vector_score
             ORDER BY par.number
             LIMIT 5
@@ -837,7 +835,6 @@ Question: {question}""",
              head([x IN nodes(p) WHERE x:Paragraph]) AS paragraph
         WHERE l IS NOT NULL
         RETURN DISTINCT l.title AS legislation_title,
-               l.description AS legislation_short,
                l.uri AS legislation_uri,
                l.status AS legislation_status,
                part.number AS part_number,
@@ -848,7 +845,6 @@ Question: {question}""",
                section.title AS section_title,
                paragraph.number AS paragraph_number,
                coalesce(paragraph.text, n.text, n.title, n.description) AS matched_text,
-               coalesce(l.is_current, true) AS is_current,
                h.score AS vector_score
         ORDER BY vector_score DESC
         LIMIT $limit
@@ -897,39 +893,7 @@ Question: {question}""",
                     parts.append(f"[{yr}:] " + " ".join(by_year[yr]))
                 row["matched_text"] = "\n".join(parts)
 
-        # Attach 'krydshenvisninger': the §§ each retrieved provision explicitly
-        # cross-references (CITES edges parsed from the law text by
-        # build_cites_edges.py), as ready citations — hands the agent the next
-        # link in a multi-law chain. Pure additive data; no prompt change.
-        _pairs = list({
-            (r["legislation_short"], str(r["section_number"]).strip().upper())
-            for r in rows
-            if isinstance(r, dict) and r.get("legislation_short") and r.get("section_number")
-        })
-        if _pairs:
-            _cmap = {}
-            for _r in analysis.run_query(
-                """
-                UNWIND $pairs AS pr
-                MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
-                WHERE coalesce(l.is_current, true) AND l.description = pr[0]
-                  AND toUpper(trim(s.number)) = pr[1]
-                MATCH (s)-[:CITES]->(t:Section)<-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]-(tl:Legislation)
-                WHERE coalesce(tl.is_current, true)
-                RETURN pr[0] AS lov, pr[1] AS sec,
-                       collect(DISTINCT tl.description + ' § ' + t.number)[0..12] AS cites
-                """,
-                {"pairs": [list(p) for p in _pairs]},
-            ):
-                _cmap[(_r["lov"], _r["sec"])] = _r["cites"]
-            for r in rows:
-                if not isinstance(r, dict):
-                    continue
-                key = (r.get("legislation_short"), str(r.get("section_number")).strip().upper())
-                if _cmap.get(key):
-                    r["krydshenvisninger"] = _cmap[key]
-
-        return _attach_kilde(rows)
+        return rows
 
     class ContextualTextRetrieverInput(BaseModel):
         q: str = Field(..., description="Natural language legal query.")
