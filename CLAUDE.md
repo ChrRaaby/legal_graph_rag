@@ -2,6 +2,10 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Current work queue
+
+**`IMPROVEMENT_BACKLOG.md` is the active execution plan** (phases A–D, ranked, with ground rules and the measurement protocol). Read it before starting any improvement work — its ground rules encode measured experimental evidence and override intuition (e.g. never force-inject extra data into retrieval output for the current 26B model).
+
 ## Project Overview
 
 A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law. The Streamlit app (`app.py`) is the main deliverable.
