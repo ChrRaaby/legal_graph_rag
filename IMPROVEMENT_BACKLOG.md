@@ -22,6 +22,28 @@ These encode hard-won experimental evidence. Violating them re-runs failed exper
 10. **Kill eval runs by PID**, never `pkill -f eval_run` (it matches its own shell and self-kills).
 11. **Gated items** (bottom of file) need explicit user approval before starting.
 
+## 0.5 Who runs what — model triage (Fable 5 vs Opus/Sonnet)
+
+This plan is written so a mid-tier model can execute it safely: the ground rules, anchors, verify steps, and measurement protocol are the guardrails. The split is about **where judgment, legal assertion, or direction-setting happens** — not task size. Rule of thumb: *Opus/Sonnet execute the written plan; Fable writes the next plan.*
+
+| Work | Model | Why |
+|---|---|---|
+| Phase A (A1–A4) | **Sonnet** | Mechanical, explicit verify steps |
+| Phase B UI (B1–B7) | **Sonnet**; B3 Kilder panel → **Opus** | Visually verifiable, low blast radius; B3 has design surface |
+| C1–C3 implementation + protocol runs | **Opus** | Designs fully specified here |
+| C-phase **keep/revert verdicts** | **Fable** (or user) | Cheap but pivotal: Opus runs the experiment and saves artifacts; a short Fable session reads the judge deltas and decides. This is where the "enrichment hurts the 26B" class of insight comes from |
+| C4 reranker: run → interpret | **Opus** runs, **Fable** interprets | Outcome decides the whole retrieval roadmap (narrowing pipeline vs model swap) |
+| C5 prompt pruning | **Fable only** | Most failure-prone change class in project history (two bad prompt regressions); scorer-fitting vs load-bearing is pure judgment |
+| D1/D2 law loading | **Opus** | Operational pipeline; STOP and escalate if crawler output looks structurally odd (1922-statsskattelov stub lesson) |
+| D3-style golden-set authoring | **Fable** + user review gate | Asserts legal content. Template: the 2026-07-05 v4.0 session (verify every anchor against graph/corpus, self-test expected_answers with the real scorer, gate on user review) |
+| D4 re-chunking | **Opus** | Protocol-covered |
+| D5 rate-table **design** | **Fable**; implementation → Opus | Data-modeling from garbled dual-column rows (see gs-047 note) is judgment work |
+| Gated items (concept layer, Qwen3/flash-3.5 swap evaluation and interpretation) | **Fable** | Legal doctrine + architecture direction |
+| Measurement mechanics (5× runs, judge re-scores, baselines) | **Sonnet** | Cookbook, commands in §2 |
+| GCP migration (when resumed) | **Sonnet/Opus** | Decisions locked in memory todo |
+
+**Escalation rule:** if a delegated session hits something these ground rules don't cover, or a result contradicts expectations (e.g. judge drops when it shouldn't), STOP — don't improvise a fix. Record the artifacts and hand the decision to a Fable session (or the user). Root-cause hunts on surprising results have historically produced the project's most valuable findings; they are not mid-tier work.
+
 ## 1. Established baselines (what "better" means)
 
 | Config | Deterministic score | Judge score |
