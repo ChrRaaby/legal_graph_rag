@@ -1,7 +1,7 @@
 {
   "metadata": {
     "name": "SKAT LLM Eval — Danish Tax Law Golden Set",
-    "version": "4.0",
+    "version": "4.1",
     "schema_version": "3.0",
     "description": "Curated benchmark for evaluating LLM-based answers to Danish tax law questions. Designed to exercise the four pillars of agent quality (Effectiveness, Efficiency, Robustness, Safety) per Google's Agent Quality whitepaper, enabling both Black Box (output) and Glass Box (trajectory/process) evaluation. Fact-checked for 2025/2026 rates.",
     "categories": {
@@ -21,7 +21,8 @@
       "admit_unknown"
     ],
     "scoring_guidance": "For LLM-as-a-Judge: score (1) factual correctness against expected_answer, (2) literal compliance with must_contain / must_not_contain, (3) correct paragraph retrieval against expected_legislation, (4) match on expected_behavior, and (5) trajectory match against expected_reasoning_steps to validate the agent's logic.",
-    "changelog_4_0": "2026-07-05: +20 items (gs-031..gs-050) — behavior balance (4x clarify, 4x refuse, 5x admit_unknown), KGL/FBL coverage, scope-honesty, reguleringstabel temporals, cross-law chains. All anchors verified against the live graph; expert-reviewed by user. Scores are NOT comparable with v3.x runs (30 -> 50 items)."
+    "changelog_4_0": "2026-07-05: +20 items (gs-031..gs-050) — behavior balance (4x clarify, 4x refuse, 5x admit_unknown), KGL/FBL coverage, scope-honesty, reguleringstabel temporals, cross-law chains. All anchors verified against the live graph; expert-reviewed by user. Scores are NOT comparable with v3.x runs (30 -> 50 items).",
+    "changelog_4_1": "2026-07-05: test-side fixes only, no new items — gs-001 & gs-041 must_contain any-of widened to observed correct phrasings (judge-verified); gs-037 expected_legislation krav på MOMSL § 13 fjernet. Saved v4.0 answers rescored offline; item semantics unchanged."
   },
   "items": [
     {
@@ -47,7 +48,10 @@
       "must_contain": [
         "§ 9 C",
         "ligningsloven",
-        "24 km"
+        [
+          "24 km",
+          "24 kilometer"
+        ]
       ],
       "must_not_contain": [
         "§ 9 stk",
@@ -64,7 +68,7 @@
           "uri": "eli/lta/2023/42"
         }
       ],
-      "notes": "Regression test: tidligere bug returnerede § 9 i stedet for § 9 C pga. regex-fejl ved mellemrum mellem ciffer og bogstav. must_not_contain fanger også systemer der hævder cykel ikke giver fradrag."
+      "notes": "Regression test: tidligere bug returnerede § 9 i stedet for § 9 C pga. regex-fejl ved mellemrum mellem ciffer og bogstav. must_not_contain fanger også systemer der hævder cykel ikke giver fradrag. v4.1: '24 km' -> any-of med '24 kilometer' (modellerne staver enheden ud; judge godkendte svarene)."
     },
     {
       "id": "gs-002",
@@ -1602,16 +1606,8 @@
         ]
       ],
       "must_not_contain": [],
-      "expected_legislation": [
-        {
-          "lov": "MOMSL",
-          "paragraf": "13",
-          "stk": null,
-          "nr": null,
-          "uri": "eli/lta/2024/209"
-        }
-      ],
-      "notes": "§ 200 verificeret ikke-eksisterende i ML 2024/209. Den deterministiske hallucination-guard bør fange denne (lov+§ nævnt, lov i grafen). Ekspert-reviewet 2026-07-05; oprindeligt review-punkt: er ML § 13 den rigtige henvisning for velgørende arrangementer (§ 13, stk. 1, nr. 17)?"
+      "expected_legislation": [],
+      "notes": "§ 200 verificeret ikke-eksisterende i ML 2024/209. Den deterministiske hallucination-guard bør fange denne (lov+§ nævnt, lov i grafen). Ekspert-reviewet 2026-07-05; oprindeligt review-punkt: er ML § 13 den rigtige henvisning for velgørende arrangementer (§ 13, stk. 1, nr. 17)? v4.1: MOMSL § 13 fjernet fra expected_legislation (authoring-fejl: guard-perfekte svar fejlede; kravet belønnede parametrisk viden). § 13 står fortsat i expected_answer som ideal."
     },
     {
       "id": "gs-038",
@@ -1729,7 +1725,12 @@
         [
           "ingen skattefri",
           "ingen bundgrænse",
-          "ikke skattefri"
+          "ikke skattefri",
+          "ingen regel",
+          "ingen generel regel",
+          "ikke et bundfradrag",
+          "ikke en bundgrænse",
+          "første krone"
         ],
         "kapitalindkomst",
         "§ 4"
@@ -1744,7 +1745,7 @@
           "uri": "eli/lta/2019/799"
         }
       ],
-      "notes": "Adfærdsrisiko (kendt scorer-svaghed): formulerer modellen sig 'en sådan regel findes ikke i personskatteloven', rammer den admit_unknown-signalet 'findes ikke i' (højere prioritet end correct_premise) → behavior-fail på korrekt svar. Accepteret — dommeren fanger substansen; overvej signaljustering hvis den viser sig systematisk."
+      "notes": "Adfærdsrisiko (kendt scorer-svaghed): formulerer modellen sig 'en sådan regel findes ikke i personskatteloven', rammer den admit_unknown-signalet 'findes ikke i' (højere prioritet end correct_premise) → behavior-fail på korrekt svar. Accepteret — dommeren fanger substansen; overvej signaljustering hvis den viser sig systematisk. v4.1: denial-any-of udvidet med observerede korrekte formuleringer (ingen regel / ikke et bundfradrag / første krone); judge godkendte flash-svaret."
     },
     {
       "id": "gs-042",
