@@ -189,7 +189,7 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 **Feedback round 1 incorporated (user approved direction 2026-07-05):** node inspector, tool/LLM I/O drill-down, deterministic-first context search + AI analyze endpoint, per-call token/cost badges, Eval lens with dimension matrix — see the doc's "Feedback round 1" section; all are V1 contract.
 
 **Implementation kickoff (green-lit by user 2026-07-05):**
-- **Prerequisite:** Node.js is NOT installed in this WSL environment (verified) — the Vite/React build needs it. User installs (nvm LTS recommended) before E1; everything backend-side runs on the existing `.venv`.
+- **Prerequisite: DONE 2026-07-05** — Node v24.18.0 LTS installed via nvm; symlinked into `~/.local/bin` so it works in BOTH interactive shells and Claude Code's non-interactive Bash (plain `node`/`npm` just work). Backend runs on the existing `.venv`.
 - **Branch:** create `maskinrummet-e1` off the current branch; E-work must not touch agent logic in app.py (additive imports only, like eval_run.py does).
 - **Layout:** `server.py` next to app.py; frontend in `frontend/` (Vite root), build output served by FastAPI.
 - **Session discipline:** one session per task (E0, then E1, …). Kickoff prompt for the implementing session: *"Read IMPROVEMENT_BACKLOG.md Phase E, whitepapers/frontend_maskinrummet_design.md, and open whitepapers/mockups/maskinrummet_mockup.html — then implement E<N>. The mockup is the V1 scope contract; the doc's acceptance criteria gate completion."*
