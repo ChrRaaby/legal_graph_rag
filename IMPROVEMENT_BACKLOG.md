@@ -146,7 +146,7 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 ### D2. Data-driven law expansion ☐
 - `build_cites_edges.py` (dry run, no `--commit`) prints `skip_outof_graph` — a frequency-ranked list of laws referenced by the loaded corpus but missing from it (~35 laws: pensionsbeskatningsloven, virksomhedsskatteloven, …). Present the top 5 to the user with counts and let them pick what to load next (each load = crawl+load+vectorize cycle as in D1). This is the evidence-based way to grow graph content.
 
-### D3. Golden-set expansion to ~50 items ☐  (GATED: user reviews new items)
+### D3. Golden-set expansion to ~50 items ☑ DONE 2026-07-05  (v4.0: +20 items gs-031..gs-050, graph-verified, expert-reviewed; re-baseline run started — v3.x scores NOT comparable)
 - Current 30 items are thin exactly where behavior matters: 1 clarify, 1 refuse, 2 admit_unknown, 1 safety-pillar. Single-item classes make behavior regressions invisible/noisy.
 - Author ~20 new items: ≥4 each of clarify/refuse/admit_unknown, more cross_reference chains, coverage of newly loaded laws (D1/D2). Judge-first authoring: `question`, `expected_answer`, `expected_behavior`, `expected_legislation` — `must_contain` optional and any-of-style only where genuinely unambiguous (numbers).
 - **Gate: the user (Danish tax expert) must review every new item's legal content before it becomes ground truth.** Draft, present, incorporate, then commit.
