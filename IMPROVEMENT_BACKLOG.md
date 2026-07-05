@@ -188,6 +188,13 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 
 **Feedback round 1 incorporated (user approved direction 2026-07-05):** node inspector, tool/LLM I/O drill-down, deterministic-first context search + AI analyze endpoint, per-call token/cost badges, Eval lens with dimension matrix — see the doc's "Feedback round 1" section; all are V1 contract.
 
+**Implementation kickoff (green-lit by user 2026-07-05):**
+- **Prerequisite:** Node.js is NOT installed in this WSL environment (verified) — the Vite/React build needs it. User installs (nvm LTS recommended) before E1; everything backend-side runs on the existing `.venv`.
+- **Branch:** create `maskinrummet-e1` off the current branch; E-work must not touch agent logic in app.py (additive imports only, like eval_run.py does).
+- **Layout:** `server.py` next to app.py; frontend in `frontend/` (Vite root), build output served by FastAPI.
+- **Session discipline:** one session per task (E0, then E1, …). Kickoff prompt for the implementing session: *"Read IMPROVEMENT_BACKLOG.md Phase E, whitepapers/frontend_maskinrummet_design.md, and open whitepapers/mockups/maskinrummet_mockup.html — then implement E<N>. The mockup is the V1 scope contract; the doc's acceptance criteria gate completion."*
+- **Verify E1 by the doc's acceptance test:** ask the gs-025 question in the new UI, watch it live, scrub the replay; both APP_MODE values behave per spec.
+
 ### E0. eval_run.py run-metadata stamp ☐ — SMALL, Sonnet-lane, do BEFORE next experiments: stamp {git_sha, provider, set_version, ts} into every output record (the Eval lens needs attributable runs; C-phase runs should already carry this)
 ### E1. The spine ☐ — server.py + chat + Kredsløbet (live) + Tidslinjen w/ replay; APP_MODE both
 ### E2. The lenses ☐ — Graflinsen (+subgraph & node-detail endpoints, node inspector), Tankestrømmen (+I/O drill-down, context reconstruction, context search/analyze, token/cost badges), kilder-chips m/ verification + graph-highlight, feedback, historical replay
