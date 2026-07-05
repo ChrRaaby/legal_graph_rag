@@ -79,7 +79,25 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 sys.path.insert(0, str(Path(__file__).parent))
-from app import build_runtime, stream_agent_answer, log_trajectory  # noqa: E402
+from app import build_runtime, stream_agent_answer, log_trajectory, resolve_llm_provider  # noqa: E402
+
+
+def _git_sha() -> str:
+    """Short git commit hash of the working tree HEAD, for run provenance
+    (so eval results can be attributed to the exact app version that produced
+    them). Falls back to 'unknown' outside a git repo or if git is unavailable
+    — this must never abort a run."""
+    import subprocess
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--short", "HEAD"],
+            cwd=str(Path(__file__).parent),
+            capture_output=True, text=True, timeout=5,
+        )
+        sha = result.stdout.strip()
+        return sha if result.returncode == 0 and sha else "unknown"
+    except Exception:
+        return "unknown"
 
 # ── Behavior detection ────────────────────────────────────────────────────────
 # Signal phrases mapped to expected_behavior values. Matched case-insensitively.
@@ -724,6 +742,12 @@ def main() -> None:
         golden = json.load(f)
     items = golden["items"]
 
+    # Run-provenance stamp, added to every output record (see backlog task E0):
+    # lets historical eval_results_*.jsonl files be attributed to the exact app
+    # commit, LLM provider, and golden-set version that produced them.
+    run_git_sha = _git_sha()
+    run_set_version = golden.get("metadata", {}).get("version", "unknown")
+
     if args.item_ids:
         ids = set(args.item_ids.split(","))
         items = [it for it in items if it["id"] in ids]
@@ -761,6 +785,9 @@ def main() -> None:
 
     print("Loading agent runtime…")
     analysis, agent_executor, _tools = build_runtime_with_retry()
+    # Same resolution build_runtime() applies internally (provider=None default) —
+    # computed here too so every output record can be stamped with it.
+    run_provider = resolve_llm_provider()
 
     judge_llm = None
     if args.judge or args.scorer == "judge":
@@ -799,8 +826,13 @@ def main() -> None:
             raise RuntimeError(f"LLM quota exhausted on item {item['id']}")
 
         scores = score_item(item, answer, tool_events)
-        result: dict = {"item": item, "answer": answer, "latency_s": latency,
-                        "scores": scores, "run_idx": _run_state["idx"]}
+        result: dict = {
+            "item": item, "answer": answer, "latency_s": latency,
+            "scores": scores, "run_idx": _run_state["idx"],
+            "git_sha": run_git_sha, "provider": run_provider,
+            "set_version": run_set_version,
+            "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }
 
         if judge_llm is not None:
             judge = llm_judge(item, answer, judge_llm)

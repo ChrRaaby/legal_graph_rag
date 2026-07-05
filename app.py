@@ -374,21 +374,30 @@ def _enforce_existence_guard(answer: str, facts: list[dict]) -> str:
     return "\n\n".join(corrections) + "\n\n" + answer
 
 
+def resolve_llm_provider(provider: str | None = None) -> str | None:
+    """Resolve the effective provider string: argument → LLM_PROVIDER env var →
+    auto-detect. Provider is "ollama", "openai", or "gemini:<model-name>" (e.g.
+    "gemini:gemini-2.5-pro"). Plain "gemini" (no suffix) uses GEMINI_MODEL.
+    Guard against non-string values (e.g. MagicMock from headless eval context).
+
+    Pulled out of build_runtime() as a standalone, side-effect-free function so
+    callers (e.g. eval_run.py, for run-metadata stamping) can learn the actual
+    resolved provider without duplicating this logic or triggering a full
+    runtime build."""
+    _known = {"ollama", "gemini", "openai"} | {f"gemini:{m}" for m in GEMINI_MODELS}
+    return (provider if provider in _known else None) or LLM_PROVIDER or (
+        "ollama" if OLLAMA_MODEL else
+        f"gemini:{GEMINI_MODEL}" if GOOGLE_API_KEY else
+        "openai" if OPENAI_API_KEY else None
+    )
+
+
 @st.cache_resource(show_spinner=False)
 def build_runtime(provider: str | None = None):
     if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
         raise RuntimeError("Missing Neo4j credentials. Set NEO4J_URI, NEO4J_USER, and NEO4J_PASSWORD.")
 
-    # Resolve provider: argument → LLM_PROVIDER env var → auto-detect.
-    # Provider is "ollama", "openai", or "gemini:<model-name>" (e.g. "gemini:gemini-2.5-pro").
-    # Plain "gemini" (no suffix) uses GEMINI_MODEL. Guard against non-string values
-    # (e.g. MagicMock from headless eval context).
-    _known = {"ollama", "gemini", "openai"} | {f"gemini:{m}" for m in GEMINI_MODELS}
-    _provider = (provider if provider in _known else None) or LLM_PROVIDER or (
-        "ollama" if OLLAMA_MODEL else
-        f"gemini:{GEMINI_MODEL}" if GOOGLE_API_KEY else
-        "openai" if OPENAI_API_KEY else None
-    )
+    _provider = resolve_llm_provider(provider)
     if not _provider:
         raise RuntimeError("Set LLM_PROVIDER (or OLLAMA_MODEL / GOOGLE_API_KEY / OPENAI_API_KEY) in your environment.")
 
