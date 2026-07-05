@@ -154,6 +154,53 @@ header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:4px 2px
 .tl-legend{display:flex;gap:14px;font-size:10.5px;color:var(--ink-3)}
 .tl-legend i{display:inline-block;width:10px;height:6px;border-radius:2px;margin-right:4px}
 
+/* drill-down extras on thought cards */
+.th .meta{display:flex;gap:10px;flex-wrap:wrap;font:10.5px var(--mono);color:var(--ink-3);margin-top:6px;font-variant-numeric:tabular-nums}
+.th details{margin-top:6px;font-size:12px}
+.th summary{cursor:pointer;color:var(--accent);font-size:11.5px;letter-spacing:.2px}
+.th summary:hover{text-decoration:underline}
+.th details pre{font:10.5px var(--mono);color:var(--ink-2);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;overflow-x:auto;margin:6px 0 0;white-space:pre}
+.ctx-ask{display:flex;gap:6px;margin-top:7px}
+.ctx-ask input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--ink);font:11.5px var(--sans);padding:5px 9px}
+.ctx-ask input::placeholder{color:var(--ink-3)}
+.ctx-verdict{margin-top:5px;font-size:11.5px;color:var(--ink-2);border-left:2px solid var(--accent);padding:3px 8px;display:none}
+.ctx-verdict.show{display:block}
+.ctx-verdict mark{background:var(--accent-dim);color:var(--accent);padding:0 3px;border-radius:3px}
+.ctx-hint{font-size:10px;color:var(--ink-3);margin-top:3px}
+
+/* graflinsen node panel */
+.node-panel{position:absolute;top:10px;right:10px;width:min(46%,340px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;box-shadow:0 8px 28px rgba(0,0,0,.35);display:none;max-height:82%;overflow-y:auto}
+.node-panel.show{display:block}
+.node-panel h4{margin:0 0 4px;font-family:var(--serif);font-size:15px;color:var(--ink)}
+.node-panel .np-badges{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.node-panel .np-badge{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--ink-2)}
+.node-panel .np-badge.ok{color:var(--good);border-color:rgba(12,163,12,.4)}
+.node-panel p{font-size:12px;color:var(--ink-2);margin:0 0 8px;line-height:1.5}
+.node-panel .np-links{display:flex;gap:10px;font-size:11.5px}
+.node-panel .np-links a{color:var(--accent);text-decoration:none}
+.node-panel .np-links a:hover{text-decoration:underline}
+.np-close{position:absolute;top:8px;right:10px;color:var(--ink-3);font-size:14px}
+.gn{cursor:pointer}
+
+/* eval tab */
+.eval{height:100%;overflow-y:auto;padding:12px 16px;display:flex;flex-direction:column;gap:14px}
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:8px}
+.tile{background:var(--panel-2);border:1px solid var(--line);border-radius:9px;padding:9px 12px}
+.tile .v{font-size:19px;font-weight:650;font-variant-numeric:tabular-nums}
+.tile .k{font-size:10px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3)}
+.eval h5{margin:2px 0 0;font-size:11px;letter-spacing:.7px;text-transform:uppercase;color:var(--ink-3);font-weight:600}
+.etbl{width:100%;border-collapse:collapse;font-size:12px}
+.etbl th{font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--ink-3);text-align:left;font-weight:600;padding:5px 8px;border-bottom:1px solid var(--line)}
+.etbl td{padding:5px 8px;border-bottom:1px solid var(--line);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.etbl td.num{text-align:right}
+.etbl tr.worst td{color:var(--ink)}
+.etbl tr.worst td:first-child::after{content:" → C1-mål";color:var(--accent);font-size:10px}
+.etbl tr:hover td{background:var(--accent-dim)}
+.runrow{font-size:12px;display:flex;gap:14px;flex-wrap:wrap;border:1px solid var(--line);border-radius:8px;padding:8px 12px;color:var(--ink-2);font-variant-numeric:tabular-nums}
+.runrow b{color:var(--ink)}
+.runrow .mono{font:11px var(--mono)}
+.eval .note{font-size:11px;color:var(--ink-3)}
+
 footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
 
 @media (max-width: 980px){
@@ -166,7 +213,7 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
   <header>
     <div class="brand"><span class="par">§</span>Skattegraf <small>MASKINRUMMET · DESIGNMOCKUP</small></div>
     <div class="badges">
-      <span class="badge">LLM <b>gemma4:26b · lokal</b></span>
+      <span class="badge">LLM <b>gemini-2.5-flash · sky</b></span>
       <span class="badge">Graf <b>20 love · 1.775 §§</b></span>
       <span class="badge mode">dev-tilstand</span>
     </div>
@@ -185,7 +232,7 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
             <button class="kilde" data-node="p8a"><span class="st"></span>PSL § 8 a</button>
           </div>
         </div>
-        <div class="status-chip" id="doneChip">✓ 3 kilder verificeret i grafen · 11,0 s</div>
+        <div class="status-chip" id="doneChip">✓ 3 kilder verificeret · 11,0 s · Σ 14,2k tok · ~0,05 kr.</div>
       </div>
       <div class="chat-foot">
         <div class="fake-input">Stil et spørgsmål om dansk skattelovgivning …</div>
@@ -200,6 +247,7 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
           <button class="tab" role="tab" aria-selected="true" data-layer="kredslob">Kredsløb</button>
           <button class="tab" role="tab" aria-selected="false" data-layer="graflinse">Graflinse<span class="n" id="nGraf">0</span></button>
           <button class="tab" role="tab" aria-selected="false" data-layer="tanker">Tankestrøm<span class="n" id="nTanker">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-layer="evalx">Eval<span class="n">2 runs</span></button>
         </div>
         <div class="mr-title">Maskinrummet</div>
       </div>
@@ -224,6 +272,45 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
             <span><i style="background:var(--h-stk)"></i>Stykke</span>
             <span><i style="background:var(--cites);border-radius:2px;height:3px;vertical-align:2px"></i>Krydshenvisning</span>
             <span><i style="background:transparent;border:2px solid var(--accent)"></i>Brugt i svaret</span>
+          </div>
+          <aside class="node-panel" id="nodePanel" aria-label="Nodeindhold">
+            <button class="np-close" id="npClose" aria-label="Luk">✕</button>
+            <h4 id="npTitle"></h4>
+            <div class="np-badges" id="npBadges"></div>
+            <p id="npText"></p>
+            <div class="np-links" id="npLinks"></div>
+          </aside>
+        </div>
+
+        <!-- EVAL: golden-set dashboard (dev mode) — REAL numbers from the v4.1 baselines -->
+        <div class="layer" id="evalx" role="tabpanel">
+          <div class="eval">
+            <div class="tiles">
+              <div class="tile"><div class="v">37,8<span style="font-size:12px;color:var(--ink-3)">/50</span></div><div class="k">gemma4:26b · det.</div></div>
+              <div class="tile"><div class="v">35,8<span style="font-size:12px;color:var(--ink-3)">/50</span></div><div class="k">gemini-2.5-flash · det.</div></div>
+              <div class="tile"><div class="v">33 / 32</div><div class="k">judge (pro) g / f</div></div>
+              <div class="tile"><div class="v">v4.1</div><div class="k">golden set · 50 items</div></div>
+            </div>
+
+            <h5>Beståelses-% pr. dimension (5×-kørsler, deterministisk)</h5>
+            <div style="overflow-x:auto"><table class="etbl">
+              <tr><th>Dimension</th><th style="text-align:right">gemma</th><th style="text-align:right">flash</th><th style="text-align:right">items</th></tr>
+              <tr><td>refusal</td><td class="num">100 %</td><td class="num">100 %</td><td class="num">5</td></tr>
+              <tr><td>temporal</td><td class="num">87 %</td><td class="num">82 %</td><td class="num">8</td></tr>
+              <tr><td>hallucination_check</td><td class="num">83 %</td><td class="num">86 %</td><td class="num">6</td></tr>
+              <tr><td>adversarial</td><td class="num">85 %</td><td class="num">54 %</td><td class="num">7</td></tr>
+              <tr><td>typical</td><td class="num">73 %</td><td class="num">71 %</td><td class="num">12</td></tr>
+              <tr><td>edge_case</td><td class="num">62 %</td><td class="num">62 %</td><td class="num">8</td></tr>
+              <tr class="worst"><td>cross_reference</td><td class="num">25 %</td><td class="num">40 %</td><td class="num">4</td></tr>
+              <tr><td style="padding-top:10px;color:var(--ink-3)">adfærd: correct_premise</td><td class="num" style="padding-top:10px">100 %</td><td class="num" style="padding-top:10px">51 %</td><td class="num" style="padding-top:10px">7</td></tr>
+              <tr><td style="color:var(--ink-3)">adfærd: clarify</td><td class="num">100 %</td><td class="num">90 %</td><td class="num">4</td></tr>
+              <tr><td style="color:var(--ink-3)">adfærd: admit_unknown</td><td class="num">80 %</td><td class="num">84 %</td><td class="num">5</td></tr>
+            </table></div>
+
+            <h5>Kørsler</h5>
+            <div class="runrow"><b>37,8/50</b> · gemma4:26b · sæt <b>v4.1</b> · app <span class="mono">3751912</span> · 5× · 2026-07-05 · judge 33</div>
+            <div class="runrow"><b>35,8/50</b> · gemini-2.5-flash · sæt <b>v4.1</b> · app <span class="mono">3751912</span> · 5× · 2026-07-05 · judge 32</div>
+            <div class="note">I den rigtige app: klik en celle → de bagvedliggende items; klik et item → afspil kørslen i Maskinrummet. Kræver at eval-kørsler stempler model + app-commit + sæt-version i output (backlog-opgave).</div>
           </div>
         </div>
 
@@ -281,12 +368,23 @@ const CAPTIONS=[
   [7200, "Formulerer svar med verificerede kilder …"],
   [11000,"Færdig — 3 kilder verificeret i grafen ✓ · 11,0 s"],
 ];
+/* mock "context blocks" — the deterministic context-search demo actually searches these */
+const CTX_BLOCKS=[
+  {name:"Systemprompt (2,1k tok)", text:"Du er en specialiseret dansk skattelovgivnings-AI-assistent … Citér altid specifikke beløb, satser og grænser præcist som de fremgår af lovteksten … CITATIONSKÆDER: Salg af medarbejderaktier (LL § 7 P): citer ALTID ABL § 12 og PSL § 8 a."},
+  {name:"Kontekst-søgning · resultat 1-12 (1,8k tok)", text:"LL § 7 P, stk. 1: Værdien af aktier, køberetter eller tegningsretter, som personer modtager som vederlag i et ansættelsesforhold, medregnes ikke ved opgørelsen af den skattepligtige indkomst, når betingelserne i stk. 2 er opfyldt. LL § 7 P, stk. 2: … værdien af vederlaget må ikke overstige 10 pct. af årslønnen … jf. aktieavancebeskatningslovens § 12 … LL § 16 stk. 3 (bagatelgrænse 1.300 kr.) …"},
+  {name:"Skattesats-opslag · resultat (0,4k tok)", text:"PSL § 8 a, stk. 1: Skat af aktieindkomst, der ikke overstiger grundbeløbet, beregnes som 27 pct. … stk. 2: Skat af aktieindkomst, der overstiger grundbeløbet, beregnes med 42 pct. Progressionsgrænse 2025: 67.500 kr. ABL § 12: gevinst medregnes uanset ejertid."},
+];
 const THOUGHTS=[
-  {t0:300, t1:3300, cls:"", who:"LLM · tanke 1", text:"Spørgsmålet gælder salg af medarbejderaktier efter LL § 7 P. Det er en citationskæde: tildelingsreglen (§ 7 P) → gevinst ved salg → indkomstkategori → sats. Jeg henter § 7 P-teksten først."},
-  {t0:3400,t1:4200, cls:"toolio", who:"Kontekst-søgning · kald", code:'{ "q": "medarbejderaktier favørkurs tildeling betingelser", "k": 10 }\n→ 12 tekststykker · LL § 7 P stk. 1–2 · LL § 16 · ABL § 12 …  (0,9 s)'},
-  {t0:4400, t1:6200, cls:"", who:"LLM · tanke 2", text:"§ 7 P: favørelementet beskattes ikke som løn ved tildelingen (grænse: 10 pct. af årslønnen, stk. 2). Beskatningen udskydes til salget — gevinsten er aktieindkomst. Kæden mangler beskatningshjemlen: ABL § 12 og PSL § 8 a. Jeg slår satserne op."},
-  {t0:6300,t1:6900, cls:"toolio", who:"Skattesats-opslag · kald", code:'{ "emne": "aktieindkomst sats progressionsgrænse" }\n→ PSL § 8 a: 27 pct. → 42 pct. · ABL § 12: uanset ejertid  (0,7 s)'},
-  {t0:7100, t1:10600, cls:"", who:"LLM · svar", text:"Kæden er komplet: LL § 7 P (udskudt lønbeskatning) → ABL § 12 (gevinstopgørelse) → PSL § 8 a (aktieindkomst, 27/42 pct.). Jeg citerer alle tre led og verificerer kilderne mod grafen."},
+  {t0:300, t1:3300, cls:"", who:"LLM · tanke 1", text:"Spørgsmålet gælder salg af medarbejderaktier efter LL § 7 P. Det er en citationskæde: tildelingsreglen (§ 7 P) → gevinst ved salg → indkomstkategori → sats. Jeg henter § 7 P-teksten først.",
+   meta:"ind 2.480 tok · ud 118 tok · ~0,001 kr. · 3,3 s", ctxIdx:[0], ask:true},
+  {t0:3400,t1:4200, cls:"toolio", who:"Kontekst-søgning · kald", code:'{ "q": "medarbejderaktier favørkurs tildeling betingelser", "k": 10 }\n→ 12 tekststykker · LL § 7 P stk. 1–2 · LL § 16 · ABL § 12 …  (0,9 s)',
+   meta:"12 rækker · 1,8k tok output", expand:{label:"Vis fuldt output (12 rækker)", content:'[{"kilde":"LL § 7 P, stk. 1","gyldighed":"gældende","tekst":"Værdien af aktier, køberetter eller tegningsretter, som personer modtager som vederlag i et ansættelsesforhold, medregnes ikke ved opgørelsen af den skattepligtige indkomst, når betingelserne i stk. 2 er opfyldt …"},\n {"kilde":"LL § 7 P, stk. 2","tekst":"… værdien af vederlaget må ikke overstige 10 pct. af årslønnen …"},\n {"kilde":"ABL § 12","tekst":"Gevinst ved afståelse af aktier medregnes … uanset ejertid"},\n … 9 rækker mere]'}},
+  {t0:4400, t1:6200, cls:"", who:"LLM · tanke 2", text:"§ 7 P: favørelementet beskattes ikke som løn ved tildelingen (grænse: 10 pct. af årslønnen, stk. 2). Beskatningen udskydes til salget — gevinsten er aktieindkomst. Kæden mangler beskatningshjemlen: ABL § 12 og PSL § 8 a. Jeg slår satserne op.",
+   meta:"ind 4.310 tok · ud 96 tok · ~0,002 kr. · 2,0 s", ctxIdx:[0,1], ask:true},
+  {t0:6300,t1:6900, cls:"toolio", who:"Skattesats-opslag · kald", code:'{ "emne": "aktieindkomst sats progressionsgrænse" }\n→ PSL § 8 a: 27 pct. → 42 pct. · ABL § 12: uanset ejertid  (0,7 s)',
+   meta:"6 uddrag · 0,4k tok output", expand:{label:"Vis fuldt output (6 uddrag)", content:'[{"lov":"Personskatteloven","uddrag":"… beregnes som 27 pct. af beløb, der ikke overstiger grundbeløbet …"},\n {"lov":"Personskatteloven","uddrag":"… 42 pct. af beløb, der overstiger grundbeløbet (67.500 kr. i 2025) …"},\n … 4 uddrag mere]'}},
+  {t0:7100, t1:10600, cls:"", who:"LLM · svar", text:"Kæden er komplet: LL § 7 P (udskudt lønbeskatning) → ABL § 12 (gevinstopgørelse) → PSL § 8 a (aktieindkomst, 27/42 pct.). Jeg citerer alle tre led og verificerer kilderne mod grafen.",
+   meta:"ind 6.150 tok · ud 486 tok · ~0,003 kr. · 3,7 s", ctxIdx:[0,1,2], ask:true},
 ];
 const ANSWER_PLAIN="Gevinsten beskattes som aktieindkomst — ikke som løn.\n\nEfter ligningslovens § 7 P beskattes favørelementet ikke ved tildelingen, når betingelserne er opfyldt (bl.a. grænsen på 10 pct. af årslønnen, § 7 P, stk. 2). Beskatningen indtræder først ved salget: gevinsten opgøres efter aktieavancebeskatningslovens § 12 og beskattes som aktieindkomst efter personskattelovens § 8 a — 27 pct. op til progressionsgrænsen og 42 pct. derover.";
 const ANSWER_HTML=ANSWER_PLAIN
@@ -417,14 +515,37 @@ function grafState(t,picked){
 }
 
 /* ── thoughts ──────────────────────────────────────────────────────────── */
+function ctxSearch(q, idxs){
+  if(!q.trim())return "";
+  const rx=new RegExp(q.trim().replace(/[.*+?^${}()|[\]\\]/g,"\\$&"),"i");
+  for(const ix of idxs){
+    const b=CTX_BLOCKS[ix], m=rx.exec(b.text);
+    if(m){
+      const i=m.index, snip=b.text.slice(Math.max(0,i-55), i+m[0].length+65);
+      return `✓ Fundet i <b>${b.name}</b>: »…${snip.slice(0,55)}<mark>${m[0]}</mark>${snip.slice(55+m[0].length)}…«`;
+    }
+  }
+  return `✗ »${q}« findes IKKE i denne kontekst (${idxs.length} blokke gennemsøgt deterministisk).`;
+}
 function thoughtsBuild(){
   const box=$("#thoughts");
   THOUGHTS.forEach((th,i)=>{
     const d=document.createElement("div");
     d.className="th "+th.cls; d.id="th-"+i;
-    d.innerHTML=`<div class="who">${th.who}</div>`+(th.code?`<code></code>`:`<span></span>`);
+    let extra="";
+    if(th.meta) extra+=`<div class="meta">${th.meta}</div>`;
+    if(th.expand) extra+=`<details><summary>${th.expand.label}</summary><pre>${th.expand.content}</pre></details>`;
+    if(th.ctxIdx) extra+=`<details><summary>Vis kontekst (${th.ctxIdx.length} blokke)</summary><pre>${th.ctxIdx.map(ix=>"── "+CTX_BLOCKS[ix].name+" ──\n"+CTX_BLOCKS[ix].text).join("\n\n")}</pre></details>`;
+    if(th.ask) extra+=`<div class="ctx-ask"><input type="text" placeholder="Søg i konteksten: fx »§ 13 A« eller »67.500« — Enter" data-th="${i}" aria-label="Søg i kontekst"></div><div class="ctx-verdict" id="verdict-${i}"></div><div class="ctx-hint">Deterministisk søgning — semantiske spørgsmål sendes til en billig AI-analysemodel i den rigtige app.</div>`;
+    d.innerHTML=`<div class="who">${th.who}</div>`+(th.code?`<code></code>`:`<span></span>`)+extra;
     box.appendChild(d);
   });
+  box.querySelectorAll(".ctx-ask input").forEach(inp=>inp.addEventListener("keydown",e=>{
+    if(e.key!=="Enter")return;
+    const i=Number(inp.dataset.th), v=$("#verdict-"+i);
+    v.innerHTML=ctxSearch(inp.value, THOUGHTS[i].ctxIdx);
+    v.classList.add("show");
+  }));
 }
 function thoughtsState(t){
   let n=0;
@@ -517,6 +638,32 @@ document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
   document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",x===b?"true":"false"));
   document.querySelectorAll(".layer").forEach(l=>l.classList.toggle("active",l.id===b.dataset.layer));
 }));
+/* graflinsen: click node -> content panel (in the real app: live graph lookup) */
+const NODE_INFO={
+  p7p:{title:"Ligningsloven § 7 P",badges:["✓ gældende","LBK 2025/1500"],
+    text:"Stk. 1. Værdien af aktier, køberetter til aktier eller tegningsretter til aktier, som personer modtager som vederlag i et ansættelsesforhold, medregnes ikke ved opgørelsen af den skattepligtige indkomst, når betingelserne i stk. 2 er opfyldt. — Stk. 2, nr. 2: … værdien af vederlaget må ikke overstige 10 pct. af den ansattes årsløn …",
+    eli:"https://www.retsinformation.dk/eli/lta/2025/1500"},
+  a12:{title:"Aktieavancebeskatningsloven § 12",badges:["✓ gældende","LBK 2021/172"],
+    text:"Gevinst ved afståelse af aktier medregnes ved opgørelsen af den skattepligtige indkomst — uanset ejertid. Gevinsten beskattes som aktieindkomst, jf. personskattelovens § 8 a.",
+    eli:"https://www.retsinformation.dk/eli/lta/2021/172"},
+  p8a:{title:"Personskatteloven § 8 a",badges:["✓ gældende","LBK 2019/799"],
+    text:"Stk. 1. Skat af aktieindkomst, der ikke overstiger grundbeløbet, beregnes som 27 pct. — Stk. 2. Skat af aktieindkomst, der overstiger grundbeløbet, beregnes med 42 pct. (Progressionsgrænse 2025: 67.500 kr., jf. reguleringstabellen.)",
+    eli:"https://www.retsinformation.dk/eli/lta/2019/799"},
+};
+function showNode(id){
+  const inf=NODE_INFO[id]||{title:GN.find(n=>n.id===id)?.label||id,badges:["hierarki-node"],
+    text:"(I den rigtige app: nodens fulde tekst, metadata og naboer hentes live fra grafen.)",eli:null};
+  $("#npTitle").textContent=inf.title;
+  $("#npBadges").innerHTML=inf.badges.map((b,i)=>`<span class="np-badge${i===0&&b.startsWith("✓")?" ok":""}">${b}</span>`).join("");
+  $("#npText").textContent=inf.text;
+  $("#npLinks").innerHTML=(inf.eli?`<a href="${inf.eli}" target="_blank" rel="noopener">Åbn på retsinformation ↗</a>`:"")+`<a href="#" onclick="return false">Vis naboer i grafen</a>`;
+  $("#nodePanel").classList.add("show");
+}
+function wireGraphClicks(){
+  document.querySelectorAll(".gn").forEach(g=>g.addEventListener("click",()=>{picked=g.id.replace("gn-","");render(vt);showNode(picked);}));
+  $("#npClose").addEventListener("click",()=>$("#nodePanel").classList.remove("show"));
+}
+
 /* kilde chip -> highlight in graflinsen */
 document.querySelectorAll(".kilde").forEach(c=>c.addEventListener("click",()=>{
   picked=c.dataset.node;
@@ -525,7 +672,7 @@ document.querySelectorAll(".kilde").forEach(c=>c.addEventListener("click",()=>{
   render(vt);
 }));
 
-circuitBuild(); grafBuild(); thoughtsBuild(); tlBuild();
+circuitBuild(); grafBuild(); thoughtsBuild(); tlBuild(); wireGraphClicks();
 if(REDUCED){ render(T_END); } else { render(0); setTimeout(play,600); }
 </script>
 

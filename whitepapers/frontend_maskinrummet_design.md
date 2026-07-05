@@ -62,6 +62,16 @@ Calm dark control-room as the hero theme (light theme fully supported, token-lev
 - **Data colors** (validated dataviz reference palette; color follows entity, fixed): Agent/LLM violet `#9085e9`/`#4a3aa7`; tools aqua `#199e70`/`#1baf7a`; graph hierarchy = blue **ordinal ramp** by depth (dark: Lov `#1c5cab` → Kapitel `#2a78d6` → § `#3987e5` → stk `#86b6ef`); CITES magenta `#d55181`/`#e87ba4`; status good/critical `#0ca30c`/`#d03b3b`. Every node direct-labeled (relief rule — identity never color-alone).
 - **Type:** display serif for identity/§ (Palatino stack — Danish legal gravitas), system sans for UI, mono for payloads. `tabular-nums` on the timeline.
 
+## Feedback round 1 (user, 2026-07-05 — mockup "spot on", these are additions)
+
+All five are IN the updated mockup and part of the V1 contract:
+
+1. **Graflinsen node inspector** — click any node → panel with the provision's full text, validity badges (gældende/historisk, LBK), ELI deep link, "vis naboer". Backend: extend `GET /api/graph/subgraph` with a `node/{id}` detail endpoint (text + metadata + 1-hop neighbors).
+2. **Tool/LLM I/O drill-down** — every Tankestrøm card expands: tool cards → the FULL result payload (not the 1200-char preview — the SSE `tool_result` event needs a `full` field or a lazy `GET /api/run/{id}/call/{n}/output`); LLM cards → the exact reconstructed context (system prompt, history, injected tool results) via `GET /api/run/{id}/call/{n}/context`. Requires `stream_agent_answer` to keep per-call context snapshots (or reconstruct deterministically from the event log — preferred, zero memory overhead).
+3. **Context analysis** — per LLM-call: a search box, **deterministic first** (regex/substring over the context blocks — instant, free; the mockup demos this working), with AI escalation for semantic questions ("er bagatelgrænsen dækket?") → `POST /api/run/{id}/call/{n}/analyze {question}` powered by a cheap model (flash). Answers cite block + offset so claims are verifiable.
+4. **Token cost visibility** — per LLM-call badges (in/out tokens + kr. estimate from a provider price table in config; local Ollama shows tokens + "lokal") in Tankestrømmen, and a run total on the done-chip. Token counts already exist in the events (`usage_metadata`); only the price table is new.
+5. **Eval lens** (pulled INTO the tab rail, was E3-only) — golden-set dashboard: baseline stat tiles, **pass-% per dimension matrix** (category/behavior/difficulty × model — the mockup ships with the real v4.1 numbers), and a runs list keyed by **model + golden-set version + app git-commit + date**, cell → items → replay the item's trace in Maskinrummet. **Prerequisite (small, Sonnet-lane, can be done anytime): `eval_run.py` must stamp `{git_sha, provider, set_version, ts}` into each output record** — today the JSONL carries none of this, so historical runs can't be attributed. Add it BEFORE the next round of experiments so C-phase runs are already attributable.
+
 ## Phasing (Phase E in the backlog)
 
 - **E1 — the spine:** `server.py` + chat + Kredsløbet (runtime-truth map, live events) + Tidslinjen with replay. Acceptance: ask gs-025's question, watch the run live, scrub it afterwards; APP_MODE both work.

@@ -186,9 +186,12 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 
 **Design doc: `whitepapers/frontend_maskinrummet_design.md`** (Fable, 2026-07-05) + visual mockup `whitepapers/mockups/maskinrummet_mockup.html` — **the mockup is the V1 scope contract.** Core idea: the architecture diagram and the live agent trace are ONE surface ("Kredsløbet"), generated from runtime truth, with three synchronized lenses (circuit / graph lens / thought stream) + a scrubbable timeline; everything a pure function of `(event_log, t)`. Stack: FastAPI `server.py` (app.py stays single source, streamlit-stub import pattern) + SSE + React/Vite/TS. Implementation = Opus, per the doc's phasing:
 
+**Feedback round 1 incorporated (user approved direction 2026-07-05):** node inspector, tool/LLM I/O drill-down, deterministic-first context search + AI analyze endpoint, per-call token/cost badges, Eval lens with dimension matrix — see the doc's "Feedback round 1" section; all are V1 contract.
+
+### E0. eval_run.py run-metadata stamp ☐ — SMALL, Sonnet-lane, do BEFORE next experiments: stamp {git_sha, provider, set_version, ts} into every output record (the Eval lens needs attributable runs; C-phase runs should already carry this)
 ### E1. The spine ☐ — server.py + chat + Kredsløbet (live) + Tidslinjen w/ replay; APP_MODE both
-### E2. The lenses ☐ — Graflinsen (+subgraph endpoint), Tankestrømmen, kilder-chips m/ verification + graph-highlight, feedback, historical replay
-### E3. Dev depth ☐ — eval dashboard (golden-set grid, judge, flakiness), tool-health table, retire Streamlit
+### E2. The lenses ☐ — Graflinsen (+subgraph & node-detail endpoints, node inspector), Tankestrømmen (+I/O drill-down, context reconstruction, context search/analyze, token/cost badges), kilder-chips m/ verification + graph-highlight, feedback, historical replay
+### E3. Dev depth ☐ — Eval lens (dimension matrix, runs list keyed by model+set+app-commit, item→replay), tool-health table, retire Streamlit
 
 **Phase B is absorbed:** do NOT build B2–B7 in Streamlit; B1 (APP_MODE) survives as a backend concept (see the doc's "Relationship to Phase B" for the interim-deploy decision rule).
 
