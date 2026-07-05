@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>Maskinrummet — Skattegraf designmockup</title>
+<style>
+/* ── tokens: dark instrument room is the hero; light fully supported ───────── */
+:root{
+  --bg:#0b1220; --panel:#111b2c; --panel-2:#0e1728; --line:rgba(148,170,200,.14);
+  --ink:#e9eef5; --ink-2:#a7b4c6; --ink-3:#6c7a8f;
+  --accent:#e8a33d; --on-accent:#0b1220; --accent-dim:rgba(232,163,61,.16);
+  --llm:#9085e9; --tool:#199e70; --cites:#d55181;
+  --h-lov:#1c5cab; --h-kap:#2a78d6; --h-par:#3987e5; --h-stk:#86b6ef;
+  --good:#0ca30c; --bad:#d03b3b;
+  --glow:0 0 14px; --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --serif:"Palatino Linotype",Palatino,"URW Palladio L",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root{
+    --bg:#f7f6f2; --panel:#ffffff; --panel-2:#f1efe9; --line:rgba(20,32,46,.13);
+    --ink:#14202e; --ink-2:#4d5c6e; --ink-3:#8593a4;
+    --accent:#b87a17; --on-accent:#fffdf7; --accent-dim:rgba(184,122,23,.12);
+    --llm:#4a3aa7; --tool:#1baf7a; --cites:#c74e7e;
+    --h-lov:#104281; --h-kap:#1c5cab; --h-par:#2a78d6; --h-stk:#5598e7;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0b1220; --panel:#111b2c; --panel-2:#0e1728; --line:rgba(148,170,200,.14);
+  --ink:#e9eef5; --ink-2:#a7b4c6; --ink-3:#6c7a8f;
+  --accent:#e8a33d; --on-accent:#0b1220; --accent-dim:rgba(232,163,61,.16);
+  --llm:#9085e9; --tool:#199e70; --cites:#d55181;
+  --h-lov:#1c5cab; --h-kap:#2a78d6; --h-par:#3987e5; --h-stk:#86b6ef;
+}
+:root[data-theme="light"]{
+  --bg:#f7f6f2; --panel:#ffffff; --panel-2:#f1efe9; --line:rgba(20,32,46,.13);
+  --ink:#14202e; --ink-2:#4d5c6e; --ink-3:#8593a4;
+  --accent:#b87a17; --on-accent:#fffdf7; --accent-dim:rgba(184,122,23,.12);
+  --llm:#4a3aa7; --tool:#1baf7a; --cites:#c74e7e;
+  --h-lov:#104281; --h-kap:#1c5cab; --h-par:#2a78d6; --h-stk:#5598e7;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{max-width:1280px;margin:0 auto;padding:14px 18px 26px;display:flex;flex-direction:column;gap:12px;min-height:100vh}
+
+/* ── header ─────────────────────────────────────────────────────────────── */
+header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:4px 2px}
+.brand{font-family:var(--serif);font-size:22px;letter-spacing:.2px}
+.brand .par{color:var(--accent);margin-right:6px}
+.brand small{font-family:var(--sans);font-size:12px;color:var(--ink-3);margin-left:10px;letter-spacing:.4px}
+.badges{margin-left:auto;display:flex;gap:8px;align-items:center}
+.badge{font-size:11.5px;color:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;letter-spacing:.3px}
+.badge b{color:var(--ink);font-weight:600}
+.badge.mode{background:var(--accent-dim);border-color:transparent;color:var(--accent)}
+
+/* ── main split ─────────────────────────────────────────────────────────── */
+.split{display:grid;grid-template-columns:minmax(340px,5fr) minmax(0,8fr);gap:12px;flex:1;min-height:0}
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-width:0}
+.panel-h{display:flex;align-items:center;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-3);letter-spacing:.6px;text-transform:uppercase}
+
+/* ── chat ───────────────────────────────────────────────────────────────── */
+.chat-body{padding:14px;display:flex;flex-direction:column;gap:12px;overflow-y:auto;flex:1;min-height:320px}
+.msg{max-width:92%;border-radius:10px;padding:10px 13px;font-size:13.5px}
+.msg.user{align-self:flex-end;background:var(--accent-dim);border:1px solid transparent}
+.msg.agent{align-self:flex-start;background:var(--panel-2);border:1px solid var(--line)}
+.msg.agent strong{color:var(--accent);font-weight:600}
+.caret{display:inline-block;width:7px;height:15px;vertical-align:-2px;background:var(--accent);animation:blink 1s steps(1) infinite}
+@keyframes blink{50%{opacity:0}}
+.kilder{display:flex;gap:6px;flex-wrap:wrap;margin-top:10px}
+.kilde{display:inline-flex;align-items:center;gap:6px;font-size:12px;border:1px solid var(--line);border-radius:999px;padding:3px 10px;color:var(--ink-2);cursor:pointer;transition:border-color .25s,color .25s}
+.kilde .st{width:13px;height:13px;border-radius:50%;border:1.5px solid var(--ink-3);display:inline-block;position:relative;transition:all .25s}
+.kilde.ok{color:var(--ink);border-color:rgba(12,163,12,.45)}
+.kilde.ok .st{border-color:var(--good);background:var(--good)}
+.kilde.ok .st::after{content:"";position:absolute;left:3.5px;top:1px;width:3px;height:7px;border:solid #fff;border-width:0 2px 2px 0;transform:rotate(42deg)}
+.status-chip{align-self:flex-start;font-size:12px;color:var(--good);border:1px solid rgba(12,163,12,.4);border-radius:999px;padding:3px 11px;opacity:0;transition:opacity .4s}
+.status-chip.show{opacity:1}
+.chat-foot{border-top:1px solid var(--line);padding:10px 14px;display:flex;flex-direction:column;gap:8px}
+.fake-input{border:1px solid var(--line);border-radius:8px;padding:9px 12px;color:var(--ink-3);font-size:13px;background:var(--panel-2)}
+.disclaimer{font-size:11px;color:var(--ink-3)}
+
+/* ── maskinrum ──────────────────────────────────────────────────────────── */
+.mr-h{gap:2px}
+.tabs{display:flex;gap:2px}
+.tab{padding:6px 13px;border-radius:7px;font-size:12.5px;color:var(--ink-2);letter-spacing:.2px}
+.tab .n{font-size:10.5px;color:var(--ink-3);margin-left:5px;font-variant-numeric:tabular-nums}
+.tab[aria-selected="true"]{background:var(--accent-dim);color:var(--accent)}
+.mr-title{margin-left:auto;font-family:var(--serif);font-size:13px;color:var(--ink-3);letter-spacing:1px;text-transform:none}
+.stage{position:relative;flex:1;min-height:340px;overflow:hidden}
+.layer{position:absolute;inset:0;padding:8px;display:none}
+.layer.active{display:block}
+.layer svg{width:100%;height:100%;display:block}
+
+/* svg pieces */
+.nd{transition:filter .3s}
+.nd rect,.nd ellipse{fill:var(--panel-2);stroke:var(--line);stroke-width:1.2}
+.nd text{fill:var(--ink-2);font:11.5px var(--sans)}
+.nd .t2{fill:var(--ink-3);font-size:10px}
+.nd.agent rect{stroke:var(--llm);stroke-width:1.6}
+.nd.tool rect{stroke:var(--tool)}
+.nd.db ellipse,.nd.db rect{stroke:var(--h-par)}
+.nd.on{filter:drop-shadow(var(--glow) var(--accent))}
+.nd.on rect,.nd.on ellipse{stroke:var(--accent);stroke-width:2}
+.nd.on text{fill:var(--ink)}
+.edge{stroke:var(--line);stroke-width:1.4;fill:none;transition:stroke .3s}
+.edge.on{stroke:var(--accent);stroke-width:2;stroke-dasharray:7 5;animation:flow .5s linear infinite}
+@keyframes flow{to{stroke-dashoffset:-12}}
+@media (prefers-reduced-motion: reduce){
+  .edge.on{animation:none}
+  .caret{animation:none}
+}
+.gn circle{stroke-width:1.4;transition:opacity .4s}
+.gn text{fill:var(--ink-2);font:11px var(--sans)}
+.gn.dim{opacity:.24}
+.gn.hide{opacity:0}
+.gn.used circle{stroke:var(--accent);stroke-width:2.4;filter:drop-shadow(0 0 9px var(--accent))}
+.gn.pick text{fill:var(--ink);font-weight:600}
+.ge{stroke:var(--line);stroke-width:1.3;fill:none;transition:opacity .4s}
+.ge.cites{stroke:var(--cites);stroke-dasharray:4 4;stroke-width:1.6}
+.ge.hide{opacity:0}
+.legend{position:absolute;left:14px;bottom:10px;display:flex;gap:13px;flex-wrap:wrap;font-size:10.5px;color:var(--ink-3);background:color-mix(in srgb,var(--panel) 82%,transparent);padding:4px 10px;border-radius:7px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+
+/* thought stream */
+.thoughts{height:100%;overflow-y:auto;padding:10px 14px;display:flex;flex-direction:column;gap:10px}
+.th{border-left:3px solid var(--llm);padding:7px 12px;background:var(--panel-2);border-radius:0 8px 8px 0;font-size:13px;color:var(--ink-2);opacity:0;transition:opacity .35s}
+.th.show{opacity:1}
+.th .who{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--llm);margin-bottom:3px;font-variant-numeric:tabular-nums}
+.th.toolio{border-left-color:var(--tool)}
+.th.toolio .who{color:var(--tool)}
+.th code{font:11.5px var(--mono);color:var(--ink);display:block;overflow-x:auto;white-space:pre;padding-top:2px}
+
+/* caption + timeline */
+.caption{border-top:1px solid var(--line);padding:7px 14px;font-size:12.5px;color:var(--accent);min-height:32px;font-variant-numeric:tabular-nums}
+.tl{border-top:1px solid var(--line);padding:9px 14px 12px;display:flex;flex-direction:column;gap:6px}
+.tl-head{display:flex;align-items:center;gap:10px}
+.play{width:30px;height:30px;border-radius:50%;background:var(--accent);color:var(--on-accent);display:flex;align-items:center;justify-content:center;font-size:12px;flex:none}
+.tl-label{font-size:11px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3)}
+.tl-time{margin-left:auto;font:12px var(--mono);color:var(--ink-2);font-variant-numeric:tabular-nums}
+.tl-track{position:relative;height:46px}
+.tl-track svg{position:absolute;inset:0;width:100%;height:100%}
+.sp{rx:3;opacity:.9}
+.sp.llm{fill:var(--llm)}
+.sp.tool{fill:var(--tool)}
+.sp text{font:9.5px var(--sans)}
+.playhead{stroke:var(--accent);stroke-width:2}
+.scrub{position:absolute;inset:0;width:100%;height:100%;opacity:0;cursor:ew-resize;margin:0}
+.tl-legend{display:flex;gap:14px;font-size:10.5px;color:var(--ink-3)}
+.tl-legend i{display:inline-block;width:10px;height:6px;border-radius:2px;margin-right:4px}
+
+footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
+
+@media (max-width: 980px){
+  .split{grid-template-columns:1fr}
+  .stage{min-height:400px}
+}
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand"><span class="par">§</span>Skattegraf <small>MASKINRUMMET · DESIGNMOCKUP</small></div>
+    <div class="badges">
+      <span class="badge">LLM <b>gemma4:26b · lokal</b></span>
+      <span class="badge">Graf <b>20 love · 1.775 §§</b></span>
+      <span class="badge mode">dev-tilstand</span>
+    </div>
+  </header>
+
+  <div class="split">
+    <!-- ── chat (primary use case) ─────────────────────────────────────── -->
+    <section class="panel" aria-label="Samtale">
+      <div class="panel-h">Samtale</div>
+      <div class="chat-body" id="chat">
+        <div class="msg user">Jeg har solgt mine medarbejderaktier fra en LL § 7 P-ordning med gevinst. Hvordan beskattes gevinsten?</div>
+        <div class="msg agent" id="answer" hidden><span id="answerText"></span><span class="caret" id="caret"></span>
+          <div class="kilder" id="kilder" hidden>
+            <button class="kilde" data-node="p7p"><span class="st"></span>LL § 7 P</button>
+            <button class="kilde" data-node="a12"><span class="st"></span>ABL § 12</button>
+            <button class="kilde" data-node="p8a"><span class="st"></span>PSL § 8 a</button>
+          </div>
+        </div>
+        <div class="status-chip" id="doneChip">✓ 3 kilder verificeret i grafen · 11,0 s</div>
+      </div>
+      <div class="chat-foot">
+        <div class="fake-input">Stil et spørgsmål om dansk skattelovgivning …</div>
+        <div class="disclaimer">Svar er vejledende og genereret af en AI ud fra lovtekster — ikke juridisk rådgivning.</div>
+      </div>
+    </section>
+
+    <!-- ── maskinrummet ────────────────────────────────────────────────── -->
+    <section class="panel" aria-label="Maskinrummet">
+      <div class="panel-h mr-h">
+        <div class="tabs" role="tablist">
+          <button class="tab" role="tab" aria-selected="true" data-layer="kredslob">Kredsløb</button>
+          <button class="tab" role="tab" aria-selected="false" data-layer="graflinse">Graflinse<span class="n" id="nGraf">0</span></button>
+          <button class="tab" role="tab" aria-selected="false" data-layer="tanker">Tankestrøm<span class="n" id="nTanker">0</span></button>
+        </div>
+        <div class="mr-title">Maskinrummet</div>
+      </div>
+
+      <div class="stage">
+        <!-- KREDSLØBET: architecture map == live trace -->
+        <div class="layer active" id="kredslob" role="tabpanel">
+          <svg viewBox="0 0 760 400" aria-label="Systemkredsløb">
+            <g id="cEdges"></g><g id="cNodes"></g>
+          </svg>
+        </div>
+
+        <!-- GRAFLINSEN: what the agent sees in the knowledge graph -->
+        <div class="layer" id="graflinse" role="tabpanel">
+          <svg viewBox="0 0 760 400" aria-label="Hentet delgraf">
+            <g id="gEdges"></g><g id="gNodes"></g>
+          </svg>
+          <div class="legend">
+            <span><i style="background:var(--h-lov)"></i>Lov</span>
+            <span><i style="background:var(--h-kap)"></i>Kapitel</span>
+            <span><i style="background:var(--h-par)"></i>Paragraf</span>
+            <span><i style="background:var(--h-stk)"></i>Stykke</span>
+            <span><i style="background:var(--cites);border-radius:2px;height:3px;vertical-align:2px"></i>Krydshenvisning</span>
+            <span><i style="background:transparent;border:2px solid var(--accent)"></i>Brugt i svaret</span>
+          </div>
+        </div>
+
+        <!-- TANKESTRØMMEN -->
+        <div class="layer" id="tanker" role="tabpanel">
+          <div class="thoughts" id="thoughts"></div>
+        </div>
+      </div>
+
+      <div class="caption" id="caption">Systemkort — klik på et værktøj for beskrivelse og schema. Stil et spørgsmål, og kortet vågner.</div>
+
+      <!-- TIDSLINJEN -->
+      <div class="tl">
+        <div class="tl-head">
+          <button class="play" id="play" aria-label="Afspil forløbet">▶</button>
+          <span class="tl-label">Tidslinje — træk for at spole</span>
+          <span class="tl-time" id="clock">0,0 s / 11,0 s</span>
+        </div>
+        <div class="tl-track">
+          <svg viewBox="0 0 760 46" preserveAspectRatio="none" id="tlSvg"></svg>
+          <input type="range" class="scrub" id="scrub" min="0" max="11000" value="0" step="25" aria-label="Spol i forløbet">
+        </div>
+        <div class="tl-legend">
+          <span><i style="background:var(--llm)"></i>LLM tænker</span>
+          <span><i style="background:var(--tool)"></i>Værktøj / graf-opslag</span>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <footer>Designmockup — scriptet forløb, ingen backend. Kredsløbet genereres i den rigtige app fra runtime (værktøjsliste, LLM-udbyder) og kan aldrig vise forældet arkitektur.</footer>
+</div>
+
+<script>
+"use strict";
+const $ = (s)=>document.querySelector(s);
+const svgNS = "http://www.w3.org/2000/svg";
+const el = (n,at={},txt)=>{const e=document.createElementNS(svgNS,n);for(const k in at)e.setAttribute(k,at[k]);if(txt!=null)e.textContent=txt;return e;};
+
+/* ── the scripted run (virtual ms) ─────────────────────────────────────── */
+const T_END=11000;
+const SPANS=[
+  {t0:0,    t1:3300, kind:"llm",  label:"tænker"},
+  {t0:3300, t1:4200, kind:"tool", label:"kontekst"},
+  {t0:4200, t1:6200, kind:"llm",  label:"tænker"},
+  {t0:6200, t1:6900, kind:"tool", label:"satser"},
+  {t0:6900, t1:11000,kind:"llm",  label:"svar"},
+];
+const CAPTIONS=[
+  [0,    "LLM tænker — planlægger citationskæden …"],
+  [3300, "Kalder Kontekst-søgning: »medarbejderaktier favørkurs tildeling«"],
+  [4200, "12 tekststykker hentet fra grafen · 0,9 s"],
+  [6200, "Kalder Skattesats-opslag: »aktieindkomst sats progressionsgrænse«"],
+  [6900, "Satser fundet: PSL § 8 a — 27/42 pct. · 0,7 s"],
+  [7200, "Formulerer svar med verificerede kilder …"],
+  [11000,"Færdig — 3 kilder verificeret i grafen ✓ · 11,0 s"],
+];
+const THOUGHTS=[
+  {t0:300, t1:3300, cls:"", who:"LLM · tanke 1", text:"Spørgsmålet gælder salg af medarbejderaktier efter LL § 7 P. Det er en citationskæde: tildelingsreglen (§ 7 P) → gevinst ved salg → indkomstkategori → sats. Jeg henter § 7 P-teksten først."},
+  {t0:3400,t1:4200, cls:"toolio", who:"Kontekst-søgning · kald", code:'{ "q": "medarbejderaktier favørkurs tildeling betingelser", "k": 10 }\n→ 12 tekststykker · LL § 7 P stk. 1–2 · LL § 16 · ABL § 12 …  (0,9 s)'},
+  {t0:4400, t1:6200, cls:"", who:"LLM · tanke 2", text:"§ 7 P: favørelementet beskattes ikke som løn ved tildelingen (grænse: 10 pct. af årslønnen, stk. 2). Beskatningen udskydes til salget — gevinsten er aktieindkomst. Kæden mangler beskatningshjemlen: ABL § 12 og PSL § 8 a. Jeg slår satserne op."},
+  {t0:6300,t1:6900, cls:"toolio", who:"Skattesats-opslag · kald", code:'{ "emne": "aktieindkomst sats progressionsgrænse" }\n→ PSL § 8 a: 27 pct. → 42 pct. · ABL § 12: uanset ejertid  (0,7 s)'},
+  {t0:7100, t1:10600, cls:"", who:"LLM · svar", text:"Kæden er komplet: LL § 7 P (udskudt lønbeskatning) → ABL § 12 (gevinstopgørelse) → PSL § 8 a (aktieindkomst, 27/42 pct.). Jeg citerer alle tre led og verificerer kilderne mod grafen."},
+];
+const ANSWER_PLAIN="Gevinsten beskattes som aktieindkomst — ikke som løn.\n\nEfter ligningslovens § 7 P beskattes favørelementet ikke ved tildelingen, når betingelserne er opfyldt (bl.a. grænsen på 10 pct. af årslønnen, § 7 P, stk. 2). Beskatningen indtræder først ved salget: gevinsten opgøres efter aktieavancebeskatningslovens § 12 og beskattes som aktieindkomst efter personskattelovens § 8 a — 27 pct. op til progressionsgrænsen og 42 pct. derover.";
+const ANSWER_HTML=ANSWER_PLAIN
+  .replace("aktieindkomst —","<strong>aktieindkomst</strong> —")
+  .replace("ligningslovens § 7 P","<strong>ligningslovens § 7 P</strong>")
+  .replace("aktieavancebeskatningslovens § 12","<strong>aktieavancebeskatningslovens § 12</strong>")
+  .replace("personskattelovens § 8 a","<strong>personskattelovens § 8 a</strong>")
+  .replace(/\n\n/g,"<br><br>");
+const ANSWER_T0=7200, ANSWER_T1=10600;
+const KILDE_T=[10650,10800,10950];
+
+/* ── kredsløbet (architecture == stage) ────────────────────────────────── */
+const CN=[
+  {id:"user", x:64, y:200, w:86, h:46, label:"Bruger", cls:""},
+  {id:"agent",x:250,y:200, w:120,h:60, label:"Agent", sub:"LangGraph · ReAct", cls:"agent"},
+  {id:"t1",x:480,y:56,  w:150,h:34, label:"Kontekst-søgning", cls:"tool"},
+  {id:"t2",x:480,y:104, w:150,h:34, label:"Lov-finder", cls:"tool"},
+  {id:"t3",x:480,y:152, w:150,h:34, label:"Reguleringstabel", cls:"tool"},
+  {id:"t4",x:480,y:200, w:150,h:34, label:"Skattesats-opslag", cls:"tool"},
+  {id:"t5",x:480,y:248, w:150,h:34, label:"Citationsnet", cls:"tool"},
+  {id:"t6",x:480,y:296, w:150,h:34, label:"Cypher (læs)", cls:"tool"},
+  {id:"t7",x:480,y:344, w:150,h:34, label:"+ 9 flere værktøjer", cls:"tool"},
+  {id:"db", x:684,y:150, w:110,h:66, label:"Neo4j Aura", sub:"vidensgraf", cls:"db", cyl:true},
+  {id:"emb",x:684,y:290, w:110,h:44, label:"e5-large", sub:"embeddings", cls:"db"},
+];
+const CE=[
+  {id:"u-a", from:"user",to:"agent"},
+  {id:"a-t1",from:"agent",to:"t1"},{id:"a-t2",from:"agent",to:"t2"},
+  {id:"a-t3",from:"agent",to:"t3"},{id:"a-t4",from:"agent",to:"t4"},
+  {id:"a-t5",from:"agent",to:"t5"},{id:"a-t6",from:"agent",to:"t6"},{id:"a-t7",from:"agent",to:"t7"},
+  {id:"t-db",from:"tools",to:"db"},{id:"t1-emb",from:"t1b",to:"emb"},{id:"emb-db",from:"emb",to:"db"},
+];
+function circuitBuild(){
+  const gN=$("#cNodes"), gE=$("#cEdges");
+  const pos={}; CN.forEach(n=>pos[n.id]=n);
+  const pt=(id,side)=>{const c=pos[id];return side==="r"?[c.x+c.w/2,c.y]:[c.x-c.w/2,c.y];};
+  const bez=(a,b)=>{const [x1,y1]=a,[x2,y2]=b;const mx=(x1+x2)/2;return `M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`;};
+  CE.forEach(e=>{
+    let d;
+    if(e.id==="t-db")       d=bez([555,200],pt("db","l"));                     // tool rack trunk -> Neo4j
+    else if(e.id==="t1-emb")d=`M555,56 C 640,56 ${pos.emb.x},120 ${pos.emb.x},${pos.emb.y-pos.emb.h/2}`; // søgning -> embeddings
+    else if(e.id==="emb-db")d=`M${pos.emb.x},${pos.emb.y-pos.emb.h/2} L${pos.db.x},${pos.db.y+pos.db.h/2}`; // embeddings -> Neo4j
+    else                    d=bez(pt(e.from,"r"),pt(e.to,"l"));
+    gE.appendChild(el("path",{d,class:"edge",id:"ce-"+e.id}));
+  });
+  CN.forEach(n=>{
+    const g=el("g",{class:"nd "+n.cls,id:"cn-"+n.id});
+    if(n.cyl){
+      g.appendChild(el("rect",{x:n.x-n.w/2,y:n.y-n.h/2+7,width:n.w,height:n.h-14,rx:4}));
+      g.appendChild(el("ellipse",{cx:n.x,cy:n.y-n.h/2+7,rx:n.w/2,ry:9}));
+      g.appendChild(el("ellipse",{cx:n.x,cy:n.y+n.h/2-7,rx:n.w/2,ry:9}));
+    } else {
+      g.appendChild(el("rect",{x:n.x-n.w/2,y:n.y-n.h/2,width:n.w,height:n.h,rx:8}));
+    }
+    g.appendChild(el("text",{x:n.x,y:n.sub?n.y+1:n.y+4,"text-anchor":"middle"},n.label));
+    if(n.sub) g.appendChild(el("text",{x:n.x,y:n.y+15,"text-anchor":"middle",class:"t2"},n.sub));
+    gN.appendChild(g);
+  });
+}
+/* which circuit elements are hot at time t */
+function circuitState(t){
+  const on=new Set();
+  if(t<=0){}
+  else if(t<3300){on.add("cn-agent");on.add("ce-u-a");}
+  else if(t<4200){on.add("cn-agent");on.add("cn-t1");on.add("ce-a-t1");on.add("cn-db");on.add("ce-t-db");on.add("cn-emb");on.add("ce-t1-emb");on.add("ce-emb-db");}
+  else if(t<6200){on.add("cn-agent");}
+  else if(t<6900){on.add("cn-agent");on.add("cn-t4");on.add("ce-a-t4");on.add("cn-db");on.add("ce-t-db");}
+  else if(t<T_END){on.add("cn-agent");on.add("ce-u-a");}
+  document.querySelectorAll("#kredslob .nd").forEach(n=>n.classList.toggle("on",on.has(n.id)));
+  document.querySelectorAll("#kredslob .edge").forEach(e=>e.classList.toggle("on",on.has(e.id)));
+}
+
+/* ── graflinsen ────────────────────────────────────────────────────────── */
+const GN=[
+  {id:"ll", x:120,y:64, r:17, c:"var(--h-lov)", label:"Ligningsloven", batch:1},
+  {id:"kap",x:120,y:158,r:13, c:"var(--h-kap)", label:"Afsnit om personalegoder", batch:1},
+  {id:"p7p",x:120,y:252,r:15, c:"var(--h-par)", label:"§ 7 P", batch:1, used:true},
+  {id:"s1", x:56, y:340,r:10, c:"var(--h-stk)", label:"stk. 1", batch:1},
+  {id:"s2", x:186,y:340,r:10, c:"var(--h-stk)", label:"stk. 2", batch:1},
+  {id:"p16",x:292,y:252,r:11, c:"var(--h-par)", label:"§ 16 (ubrugt)", batch:1, dim:true},
+  {id:"abl",x:470,y:64, r:17, c:"var(--h-lov)", label:"Aktieavance-beskatningsloven", batch:2},
+  {id:"a12",x:470,y:200,r:15, c:"var(--h-par)", label:"§ 12", batch:2, used:true},
+  {id:"psl",x:648,y:64, r:17, c:"var(--h-lov)", label:"Personskatteloven", batch:2},
+  {id:"p8a",x:648,y:200,r:15, c:"var(--h-par)", label:"§ 8 a", batch:2, used:true},
+];
+const GE=[
+  {from:"ll",to:"kap",batch:1},{from:"kap",to:"p7p",batch:1},
+  {from:"p7p",to:"s1",batch:1},{from:"p7p",to:"s2",batch:1},{from:"kap",to:"p16",batch:1},
+  {from:"abl",to:"a12",batch:2},{from:"psl",to:"p8a",batch:2},
+  {from:"p7p",to:"a12",batch:2,cites:true},{from:"a12",to:"p8a",batch:2,cites:true},
+];
+function grafBuild(){
+  const gE=$("#gEdges"), gN=$("#gNodes"), pos={};
+  GN.forEach(n=>pos[n.id]=n);
+  GE.forEach((e,i)=>{
+    const a=pos[e.from], b=pos[e.to];
+    let d;
+    if(e.cites){const mx=(a.x+b.x)/2, my=Math.min(a.y,b.y)+52; d=`M${a.x},${a.y} Q${mx},${my+70} ${b.x},${b.y}`;}
+    else d=`M${a.x},${a.y} L${b.x},${b.y}`;
+    gE.appendChild(el("path",{d,class:"ge hide"+(e.cites?" cites":""),id:"ge-"+i,"data-batch":e.batch}));
+  });
+  GN.forEach(n=>{
+    const g=el("g",{class:"gn hide"+(n.dim?" dim":""),id:"gn-"+n.id,"data-batch":n.batch});
+    g.appendChild(el("circle",{cx:n.x,cy:n.y,r:n.r,fill:n.c,stroke:"var(--line)"}));
+    const lines=n.label.split("-");
+    if(lines.length>1 && n.r>15){
+      g.appendChild(el("text",{x:n.x,y:n.y+n.r+13,"text-anchor":"middle"},lines[0]+"-"));
+      g.appendChild(el("text",{x:n.x,y:n.y+n.r+25,"text-anchor":"middle"},lines[1]));
+    } else g.appendChild(el("text",{x:n.x,y:n.y+n.r+13,"text-anchor":"middle"},n.label));
+    gN.appendChild(g);
+  });
+}
+function grafState(t,picked){
+  const b1=t>=4200, b2=t>=6900, used=t>=10600;
+  let count=0;
+  GN.forEach(n=>{
+    const g=$("#gn-"+n.id), vis=(n.batch===1?b1:b2);
+    g.classList.toggle("hide",!vis);
+    if(vis)count++;
+    g.classList.toggle("used",Boolean(vis&&used&&n.used));
+    g.classList.toggle("pick",picked===n.id);
+  });
+  GE.forEach((e,i)=>{
+    const vis=(e.batch===1?b1:b2);
+    $("#ge-"+i).classList.toggle("hide",!vis);
+  });
+  $("#nGraf").textContent=count;
+}
+
+/* ── thoughts ──────────────────────────────────────────────────────────── */
+function thoughtsBuild(){
+  const box=$("#thoughts");
+  THOUGHTS.forEach((th,i)=>{
+    const d=document.createElement("div");
+    d.className="th "+th.cls; d.id="th-"+i;
+    d.innerHTML=`<div class="who">${th.who}</div>`+(th.code?`<code></code>`:`<span></span>`);
+    box.appendChild(d);
+  });
+}
+function thoughtsState(t){
+  let n=0;
+  THOUGHTS.forEach((th,i)=>{
+    const d=$("#th-"+i), body=d.querySelector("code,span");
+    const show=t>=th.t0;
+    d.classList.toggle("show",show);
+    if(!show){body.textContent="";return;}
+    n++;
+    const full=th.code||th.text;
+    const f=Math.min(1,(t-th.t0)/Math.max(1,(th.t1-th.t0)*0.8));
+    body.textContent=REDUCED?full:full.slice(0,Math.ceil(full.length*f));
+  });
+  $("#nTanker").textContent=n;
+}
+
+/* ── chat ──────────────────────────────────────────────────────────────── */
+const answerWords=ANSWER_PLAIN.split(/(\s+)/);
+function chatState(t){
+  const box=$("#answer"), txt=$("#answerText"), caret=$("#caret"),
+        kilder=$("#kilder"), chips=kilder.querySelectorAll(".kilde"), done=$("#doneChip");
+  if(t<ANSWER_T0){box.hidden=true;done.classList.remove("show");return;}
+  box.hidden=false;
+  if(t>=ANSWER_T1){txt.innerHTML=ANSWER_HTML;caret.style.display="none";}
+  else{
+    const f=(t-ANSWER_T0)/(ANSWER_T1-ANSWER_T0);
+    txt.textContent=answerWords.slice(0,Math.ceil(answerWords.length*f)).join("");
+    caret.style.display="inline-block";
+  }
+  kilder.hidden=t<KILDE_T[0]-400;
+  chips.forEach((c,i)=>c.classList.toggle("ok",t>=KILDE_T[i]));
+  done.classList.toggle("show",t>=T_END);
+}
+
+/* ── timeline ──────────────────────────────────────────────────────────── */
+const TLW=760;
+function tlBuild(){
+  const svg=$("#tlSvg");
+  SPANS.forEach(s=>{
+    const x=s.t0/T_END*TLW, w=(s.t1-s.t0)/T_END*TLW;
+    svg.appendChild(el("rect",{x,y:s.kind==="llm"?4:20,width:Math.max(2,w-2),height:13,class:"sp "+s.kind,rx:3}));
+  });
+  for(let s=0;s<=10;s+=2){
+    const x=s*1000/T_END*TLW;
+    svg.appendChild(el("text",{x,y:43,fill:"var(--ink-3)","font-size":"9"},s+"s"));
+  }
+  svg.appendChild(el("line",{x1:0,y1:0,x2:0,y2:34,class:"playhead",id:"ph"}));
+}
+function tlState(t){
+  $("#ph").setAttribute("x1",t/T_END*TLW);
+  $("#ph").setAttribute("x2",t/T_END*TLW);
+  $("#clock").textContent=(t/1000).toFixed(1).replace(".",",")+" s / 11,0 s";
+  $("#scrub").value=t;
+}
+
+/* ── caption ───────────────────────────────────────────────────────────── */
+function captionState(t){
+  if(t<=0){return;}
+  let c=CAPTIONS[0][1];
+  for(const [ct,txt] of CAPTIONS){ if(t>=ct)c=txt; }
+  $("#caption").textContent=c;
+}
+
+/* ── conductor: everything is f(t) ─────────────────────────────────────── */
+const REDUCED=matchMedia("(prefers-reduced-motion: reduce)").matches;
+let vt=0, playing=false, raf=null, last=0, picked=null;
+function render(t){
+  vt=Math.max(0,Math.min(T_END,t));
+  circuitState(vt); grafState(vt,picked); thoughtsState(vt); chatState(vt); tlState(vt); captionState(vt);
+  $("#play").textContent = playing?"⏸":(vt>=T_END?"↺":"▶");
+}
+function tick(ts){
+  if(!playing)return;
+  if(!last)last=ts;
+  const dt=ts-last; last=ts;
+  if(vt+dt>=T_END){render(T_END);playing=false;$("#play").textContent="↺";return;}
+  render(vt+dt);
+  raf=requestAnimationFrame(tick);
+}
+function play(){
+  if(playing){playing=false;cancelAnimationFrame(raf);render(vt);return;}
+  if(vt>=T_END)vt=0;
+  playing=true;last=0;raf=requestAnimationFrame(tick);
+}
+$("#play").addEventListener("click",play);
+$("#scrub").addEventListener("input",e=>{playing=false;cancelAnimationFrame(raf);render(Number(e.target.value));});
+
+/* tabs */
+document.querySelectorAll(".tab").forEach(b=>b.addEventListener("click",()=>{
+  document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",x===b?"true":"false"));
+  document.querySelectorAll(".layer").forEach(l=>l.classList.toggle("active",l.id===b.dataset.layer));
+}));
+/* kilde chip -> highlight in graflinsen */
+document.querySelectorAll(".kilde").forEach(c=>c.addEventListener("click",()=>{
+  picked=c.dataset.node;
+  document.querySelectorAll(".tab").forEach(x=>x.setAttribute("aria-selected",x.dataset.layer==="graflinse"?"true":"false"));
+  document.querySelectorAll(".layer").forEach(l=>l.classList.toggle("active",l.id==="graflinse"));
+  render(vt);
+}));
+
+circuitBuild(); grafBuild(); thoughtsBuild(); tlBuild();
+if(REDUCED){ render(T_END); } else { render(0); setTimeout(play,600); }
+</script>
+
+</body>
+</html>

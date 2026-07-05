@@ -182,6 +182,16 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 
 ---
 
+## Phase E — Maskinrummet: the new frontend (replaces Streamlit; design done, implementation gated on user go)
+
+**Design doc: `whitepapers/frontend_maskinrummet_design.md`** (Fable, 2026-07-05) + visual mockup `whitepapers/mockups/maskinrummet_mockup.html` — **the mockup is the V1 scope contract.** Core idea: the architecture diagram and the live agent trace are ONE surface ("Kredsløbet"), generated from runtime truth, with three synchronized lenses (circuit / graph lens / thought stream) + a scrubbable timeline; everything a pure function of `(event_log, t)`. Stack: FastAPI `server.py` (app.py stays single source, streamlit-stub import pattern) + SSE + React/Vite/TS. Implementation = Opus, per the doc's phasing:
+
+### E1. The spine ☐ — server.py + chat + Kredsløbet (live) + Tidslinjen w/ replay; APP_MODE both
+### E2. The lenses ☐ — Graflinsen (+subgraph endpoint), Tankestrømmen, kilder-chips m/ verification + graph-highlight, feedback, historical replay
+### E3. Dev depth ☐ — eval dashboard (golden-set grid, judge, flakiness), tool-health table, retire Streamlit
+
+**Phase B is absorbed:** do NOT build B2–B7 in Streamlit; B1 (APP_MODE) survives as a backend concept (see the doc's "Relationship to Phase B" for the interim-deploy decision rule).
+
 ## Gated / parked (do NOT start without explicit user approval)
 
 | Item | Where documented | Gate |
