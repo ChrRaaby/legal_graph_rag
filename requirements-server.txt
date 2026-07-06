@@ -1,0 +1,4 @@
+# Maskinrummet backend (server.py) — installed into the existing .venv.
+# The agent runtime itself uses requirements.txt; these are only the web server.
+fastapi>=0.110
+uvicorn[standard]>=0.27

@@ -1,0 +1,185 @@
+// Event log types + derivations. Every visual layer is a pure function of
+// (event_log, t) — this module owns the log shape and the time-derived views
+// (timeline spans, run end, caption steps) the components read.
+
+export type AgentEvent =
+  | { type: "run_start"; provider: string; question: string; ts: string }
+  | {
+      type: "llm";
+      elapsed_s: number;
+      node?: string;
+      start_s: number;
+      duration_s: number;
+      input_tokens: number;
+      output_tokens: number;
+      thinking: string;
+      is_final: boolean;
+    }
+  | { type: "tool_call"; elapsed_s: number; node?: string; tool_name: string; args: unknown }
+  | {
+      type: "tool_result";
+      elapsed_s: number;
+      node?: string;
+      tool_name: string;
+      duration_s: number | null;
+      content_preview: unknown;
+    }
+  | { type: "answer"; text: string }
+  | { type: "done"; latency_s: number; input_tokens?: number; output_tokens?: number }
+  | { type: "error"; message: string };
+
+const TOOL_LABELS: Record<string, string> = {
+  Contextual_Text_Retriever: "Kontekst-søgning",
+  Legislation_Finder: "Lov-finder",
+  Legislation_Title_Resolver: "Titel-opslag",
+  Regulering_Table_Lookup: "Reguleringstabel",
+  Skattesats_Opslag: "Skattesats-opslag",
+  Citation_Network_Explorer: "Citationsnet",
+  Supersedes_Network_Explorer: "Supersessions-net",
+  Superseded_By_Network_Explorer: "Ophævet-af-net",
+  Read_Only_Cypher: "Cypher (læs)",
+  Text2Cypher_Expert: "Tekst→Cypher",
+  Semantic_Search: "Semantisk søgning",
+  Legislation_By_URI: "Lov via URI",
+  Hierarchy_Path_Resolver: "Hierarki-opslag",
+  Citation_Counts: "Citationstal",
+  Graph_Schema_Navigator: "Skema-navigator",
+};
+
+export const toolLabel = (name: string): string =>
+  TOOL_LABELS[name] ?? name.replace(/_/g, " ");
+
+export interface Span {
+  kind: "llm" | "tool";
+  t0: number; // ms from run start
+  t1: number;
+  label: string;
+  final: boolean;
+}
+
+/** LLM windows (start_s→+duration) and tool windows (call→result), in ms. */
+export function spansFromLog(log: AgentEvent[]): Span[] {
+  const spans: Span[] = [];
+  const pending: Record<string, AgentEvent[]> = {};
+  for (const ev of log) {
+    if (ev.type === "llm") {
+      const t0 = ev.start_s * 1000;
+      spans.push({
+        kind: "llm",
+        t0,
+        t1: t0 + ev.duration_s * 1000,
+        label: ev.is_final ? "svar" : "tænker",
+        final: ev.is_final,
+      });
+    } else if (ev.type === "tool_call") {
+      (pending[ev.tool_name] ??= []).push(ev);
+    } else if (ev.type === "tool_result") {
+      const call = pending[ev.tool_name]?.shift();
+      const t0 = (call && call.type === "tool_call" ? call.elapsed_s : ev.elapsed_s) * 1000;
+      spans.push({
+        kind: "tool",
+        t0,
+        t1: ev.elapsed_s * 1000,
+        label: toolLabel(ev.tool_name),
+        final: false,
+      });
+    }
+  }
+  return spans;
+}
+
+/** Latest known moment in the log (ms) — the live clock ceiling before `done`. */
+export function liveMaxMs(log: AgentEvent[]): number {
+  let m = 0;
+  for (const ev of log) {
+    if (ev.type === "llm") m = Math.max(m, (ev.start_s + ev.duration_s) * 1000);
+    else if (ev.type === "tool_call" || ev.type === "tool_result")
+      m = Math.max(m, ev.elapsed_s * 1000);
+  }
+  return m;
+}
+
+/** Total run length (ms): the authoritative `done` latency, else latest event. */
+export function runEndMs(log: AgentEvent[]): number {
+  for (const ev of log) if (ev.type === "done") return ev.latency_s * 1000;
+  return liveMaxMs(log);
+}
+
+export function doneEvent(log: AgentEvent[]): Extract<AgentEvent, { type: "done" }> | null {
+  for (const ev of log) if (ev.type === "done") return ev;
+  return null;
+}
+
+function argPreview(args: unknown): string {
+  if (args && typeof args === "object") {
+    for (const key of ["q", "emne", "question", "uri", "query"]) {
+      const v = (args as Record<string, unknown>)[key];
+      if (typeof v === "string" && v) return v.length > 46 ? v.slice(0, 46) + "…" : v;
+    }
+  }
+  const s = JSON.stringify(args ?? "");
+  return s.length > 46 ? s.slice(0, 46) + "…" : s;
+}
+
+function resultCount(preview: unknown): number | null {
+  if (Array.isArray(preview)) return preview.length;
+  if (typeof preview === "string") {
+    const t = preview.trim();
+    if (t.startsWith("[")) {
+      // content_preview is a truncated JSON array string — count top-level rows
+      // by opening braces, good enough for a caption.
+      const m = t.match(/\{/g);
+      return m ? m.length : null;
+    }
+    if (t === "" || t === "[]") return 0;
+  }
+  return null;
+}
+
+export interface CaptionStep {
+  t: number; // ms
+  text: string;
+}
+
+/** Timed Danish narration of the run, one step per meaningful event. */
+export function captionSteps(log: AgentEvent[]): CaptionStep[] {
+  const steps: CaptionStep[] = [];
+  let seenFirstLlm = false;
+  for (const ev of log) {
+    if (ev.type === "run_start") {
+      steps.push({ t: 0, text: "LLM tænker — planlægger fremgangsmåden …" });
+    } else if (ev.type === "llm") {
+      if (ev.is_final) {
+        steps.push({ t: ev.start_s * 1000, text: "Formulerer svar med de fundne kilder …" });
+      } else if (!seenFirstLlm) {
+        seenFirstLlm = true;
+      }
+    } else if (ev.type === "tool_call") {
+      steps.push({
+        t: ev.elapsed_s * 1000,
+        text: `Kalder ${toolLabel(ev.tool_name)}: «${argPreview(ev.args)}»`,
+      });
+    } else if (ev.type === "tool_result") {
+      const n = resultCount(ev.content_preview);
+      const dur = ev.duration_s != null ? ` · ${ev.duration_s.toFixed(1).replace(".", ",")} s` : "";
+      steps.push({
+        t: ev.elapsed_s * 1000,
+        text: n != null ? `${n} resultat${n === 1 ? "" : "er"} hentet fra grafen${dur}` : `Resultat modtaget${dur}`,
+      });
+    } else if (ev.type === "done") {
+      steps.push({ t: ev.latency_s * 1000, text: `Færdig · ${ev.latency_s.toFixed(1).replace(".", ",")} s` });
+    }
+  }
+  steps.sort((a, b) => a.t - b.t);
+  return steps;
+}
+
+export function captionAt(log: AgentEvent[], tMs: number, live: boolean): string {
+  const steps = captionSteps(log);
+  if (steps.length === 0)
+    return "Systemkort — stil et spørgsmål, og kortet vågner.";
+  let text = steps[0].text;
+  for (const s of steps) if (tMs >= s.t) text = s.text;
+  if (live && tMs > liveMaxMs(log) + 200) return "LLM tænker …";
+  return text;
+}

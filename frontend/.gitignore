@@ -1,0 +1,8 @@
+node_modules/
+dist/
+*.local
+.vite/
+.replay.mjs
+test-results/
+playwright-report/
+*.tsbuildinfo
