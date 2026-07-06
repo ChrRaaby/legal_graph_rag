@@ -20,9 +20,12 @@ Run (prod):  build the frontend (npm run build), then
 import json
 import os
 import queue
+import re
+import sqlite3
 import sys
 import threading
 import time
+import uuid
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -149,6 +152,292 @@ def _architecture() -> dict:
     }
 
 
+# ── Law naming + citation resolution (law-aware, for kilder + graph) ──────────
+
+# Full title/description stem → short code, for compact labels.
+_LAW_SHORT = [
+    ("ligningslov", "LL"), ("personskattelov", "PSL"), ("selskabsskattelov", "SEL"),
+    ("kildeskattelov", "KSL"), ("merværdiafgiftslov", "ML"), ("momslov", "ML"),
+    ("aktieavancebeskatningslov", "ABL"), ("kursgevinstlov", "KGL"),
+    ("afskrivningslov", "AL"), ("fondsbeskatningslov", "FBL"), ("aktiesparekontolov", "ASKL"),
+    ("boafgiftslov", "BAL"), ("statsskattelov", "SL"),
+]
+# Abbreviation / genitive-stem → title stem, for parsing law context out of text.
+_ALIAS_STEM = {
+    "ll": "ligningslov", "psl": "personskattelov", "sel": "selskabsskattelov",
+    "ksl": "kildeskattelov", "ml": "momslov", "abl": "aktieavancebeskatningslov",
+    "kgl": "kursgevinstlov", "al": "afskrivningslov", "fbl": "fondsbeskatningslov",
+    "askl": "aktiesparekontolov", "bal": "boafgiftslov",
+    "merværdiafgiftslov": "momslov",
+}
+
+
+def _law_short(title: str) -> str:
+    tl = (title or "").lower()
+    for stem, short in _LAW_SHORT:
+        if stem in tl:
+            return short
+    return (title or "?")[:6]
+
+
+_SEC_IN_TEXT = re.compile(r"§+\s*(\d+(?:\s*[a-zæøåA-ZÆØÅ])?)\b")
+_LAW_IN_TEXT = re.compile(r"\b([a-zæøå]{4,}lov)(?:en|ens|s)?\b|\b(LL|PSL|SEL|KSL|ML|ABL|KGL|AL|FBL|ASKL|BAL)\b")
+
+
+def _law_stem(token: str) -> str | None:
+    """Map a matched law token (genitive full name or abbreviation) to a title stem."""
+    t = token.lower()
+    if t in _ALIAS_STEM:
+        return _ALIAS_STEM[t]
+    if t.endswith("lov"):
+        return t
+    return None
+
+
+def resolve_citations(answer: str) -> list[dict]:
+    """Law-aware: pull each §-reference out of the answer with the nearest
+    preceding law context, resolve it to a current Section, and report
+    verification + ELI uri + node id (for the kilder chips and graph highlight).
+    A § with no identifiable law is checked against any current law."""
+    if not answer:
+        return []
+    # Ordered list of (position, law_stem) law mentions.
+    laws: list[tuple[int, str]] = []
+    for lm in _LAW_IN_TEXT.finditer(answer):
+        stem = _law_stem(lm.group(1) or lm.group(2) or "")
+        if stem:
+            laws.append((lm.start(), stem))
+
+    seen: set[tuple[str | None, str]] = set()
+    out: list[dict] = []
+    for sm in _SEC_IN_TEXT.finditer(answer):
+        num = re.sub(r"\s+", " ", sm.group(1)).strip().upper()
+        stem = None
+        for pos, s in laws:
+            if pos < sm.start():
+                stem = s
+        key = (stem, num)
+        if key in seen:
+            continue
+        seen.add(key)
+        try:
+            if stem:
+                rows = ANALYSIS.run_query(
+                    """MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+                       WHERE toLower(coalesce(l.description,l.title,'')) CONTAINS $stem
+                         AND coalesce(l.is_current,true) AND toUpper(trim(s.number)) = $num
+                       RETURN elementId(s) AS id, coalesce(l.description,l.title) AS lov, l.uri AS uri LIMIT 1""",
+                    {"stem": stem, "num": num},
+                )
+            else:
+                rows = ANALYSIS.run_query(
+                    """MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+                       WHERE coalesce(l.is_current,true) AND toUpper(trim(s.number)) = $num
+                       RETURN elementId(s) AS id, coalesce(l.description,l.title) AS lov, l.uri AS uri LIMIT 1""",
+                    {"num": num},
+                )
+        except Exception:
+            rows = []
+        found = bool(rows)
+        lov_title = rows[0]["lov"] if found else None
+        short = _law_short(lov_title) if lov_title else (_law_short(stem) if stem else "")
+        label = f"{short} § {num}".replace(" § ", " § ") if short else f"§ {num}"
+        out.append({
+            "label": label,
+            "lov": short,
+            "section_number": num,
+            "verified": found,
+            "uri": rows[0]["uri"] if found else None,
+            "element_id": rows[0]["id"] if found else None,
+        })
+    return out
+
+
+# ── Graph-ref parsing (tool output → section refs → subgraph) ─────────────────
+
+def _refs_from_tool_output(content_full: str) -> list[dict]:
+    """Best-effort parse of retrieval-tool JSON output into section references
+    {uri, title, num}. Only rows that name a section are kept."""
+    refs: list[dict] = []
+    try:
+        rows = json.loads(content_full)
+    except Exception:
+        return refs
+    if not isinstance(rows, list):
+        return refs
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        num = row.get("section_number") or row.get("paragraf")
+        if not num:
+            continue
+        refs.append({
+            "uri": (row.get("legislation_uri") or "").strip(),
+            "title": (row.get("legislation_title") or row.get("lov") or "").strip(),
+            "num": str(num).strip(),
+        })
+    return refs
+
+
+def build_subgraph(refs: list[dict], answer: str = "") -> dict:
+    """Resolve retrieved section refs to a structured subgraph: law → section →
+    stk hierarchy, plus CITES edges from the retrieved sections (cited neighbours
+    included as their own nodes). Sections whose § is cited in the answer are
+    flagged `used`."""
+    clean = [{"uri": r.get("uri", "") or "", "title": r.get("title", "") or "", "num": (r.get("num") or "").upper()}
+             for r in refs if (r.get("num"))]
+    if not clean:
+        return {"laws": [], "sections": [], "paragraphs": [], "cites": []}
+
+    rowsA = ANALYSIS.run_query(
+        """
+        UNWIND $refs AS ref
+        MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+        WHERE ( (ref.uri <> '' AND l.uri = ref.uri)
+                OR (ref.uri = '' AND ref.title <> '' AND toLower(coalesce(l.description,l.title,'')) CONTAINS toLower(ref.title)) )
+          AND coalesce(l.is_current, true)
+          AND toUpper(trim(s.number)) = toUpper(ref.num)
+        WITH DISTINCT l, s
+        OPTIONAL MATCH (s)-[:HAS_PARAGRAPH]->(p:Paragraph)
+        RETURN elementId(l) AS law_id, coalesce(l.description,l.title) AS law_title, l.uri AS law_uri,
+               coalesce(l.is_current,true) AS law_current,
+               elementId(s) AS sec_id, s.number AS sec_num, s.title AS sec_title,
+               [x IN collect(DISTINCT {id: elementId(p), number: p.number}) WHERE x.number IS NOT NULL] AS paras
+        """,
+        {"refs": clean},
+    )
+
+    laws: dict[str, dict] = {}
+    sections: dict[str, dict] = {}
+    paragraphs: list[dict] = []
+    cited = resolve_citations(answer)
+    used_ids = {c["element_id"] for c in cited if c.get("element_id")}
+
+    for r in rowsA:
+        short = _law_short(r["law_title"])
+        laws.setdefault(r["law_id"], {
+            "id": r["law_id"], "short": short, "title": r["law_title"],
+            "uri": r["law_uri"], "is_current": r["law_current"],
+        })
+        key = f"{short}|{r['sec_num'].upper()}"
+        sections.setdefault(r["sec_id"], {
+            "id": r["sec_id"], "key": key, "law_id": r["law_id"],
+            "section_number": r["sec_num"], "title": r["sec_title"],
+            "retrieved": True, "used": r["sec_id"] in used_ids,
+        })
+        for p in r["paras"]:
+            paragraphs.append({"id": p["id"], "number": p["number"], "section_id": r["sec_id"]})
+
+    ids = list(sections.keys())
+    cites: list[dict] = []
+    if ids:
+        rowsB = ANALYSIS.run_query(
+            """
+            MATCH (a:Section)-[c:CITES]->(b:Section)
+            WHERE elementId(a) IN $ids
+            OPTIONAL MATCH (bl:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(b)
+            WITH a, b, c, bl WHERE bl IS NULL OR coalesce(bl.is_current,true)
+            RETURN DISTINCT elementId(a) AS from_id, elementId(b) AS to_id,
+                   b.number AS to_num, coalesce(bl.description,bl.title) AS to_law,
+                   bl.uri AS to_law_uri, elementId(bl) AS to_law_id, c.via AS via
+            """,
+            {"ids": ids},
+        )
+        for r in rowsB:
+            # Add the cited neighbour as a node if it isn't already retrieved.
+            if r["to_id"] not in sections and r["to_law"]:
+                short = _law_short(r["to_law"])
+                laws.setdefault(r["to_law_id"], {
+                    "id": r["to_law_id"], "short": short, "title": r["to_law"],
+                    "uri": r["to_law_uri"], "is_current": True,
+                })
+                sections[r["to_id"]] = {
+                    "id": r["to_id"], "key": f"{short}|{(r['to_num'] or '').upper()}",
+                    "law_id": r["to_law_id"], "section_number": r["to_num"], "title": None,
+                    "retrieved": False, "used": r["to_id"] in used_ids,
+                }
+            cites.append({"from": r["from_id"], "to": r["to_id"], "via": r["via"]})
+
+    return {
+        "laws": list(laws.values()),
+        "sections": list(sections.values()),
+        "paragraphs": paragraphs,
+        "cites": cites,
+    }
+
+
+def node_detail(element_id: str) -> dict:
+    rows = ANALYSIS.run_query(
+        """
+        MATCH (s:Section) WHERE elementId(s) = $id
+        OPTIONAL MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s)
+        WITH l, s WHERE l IS NULL OR coalesce(l.is_current,true)
+        OPTIONAL MATCH (s)-[:HAS_PARAGRAPH]->(p:Paragraph)
+        WITH l, s, p ORDER BY p.number
+        RETURN coalesce(l.description,l.title) AS lov, l.uri AS uri, coalesce(l.is_current,true) AS current,
+               s.number AS num, s.title AS title,
+               [x IN collect({n: p.number, t: p.text}) WHERE x.t IS NOT NULL] AS paras
+        LIMIT 1
+        """,
+        {"id": element_id},
+    )
+    if not rows:
+        return {"found": False}
+    r = rows[0]
+    return {
+        "found": True,
+        "label": f"{_law_short(r['lov'])} § {r['num']}" if r["lov"] else f"§ {r['num']}",
+        "lov": r["lov"], "short": _law_short(r["lov"]) if r["lov"] else "",
+        "section_number": r["num"], "section_title": r["title"],
+        "is_current": r["current"], "uri": r["uri"],
+        "paragraphs": [{"number": p["n"], "text": p["t"]} for p in r["paras"]],
+    }
+
+
+# ── Run + feedback persistence (own sqlite tables in observability.db) ─────────
+
+_DB_PATH = str(Path(__file__).parent / "observability.db")
+_db_lock = threading.Lock()
+
+
+def _db() -> sqlite3.Connection:
+    con = sqlite3.connect(_DB_PATH, check_same_thread=False)
+    con.row_factory = sqlite3.Row
+    con.execute("""CREATE TABLE IF NOT EXISTS mr_runs (
+        run_id TEXT PRIMARY KEY, ts TEXT NOT NULL DEFAULT (datetime('now')),
+        question TEXT, answer TEXT, provider TEXT, git_sha TEXT,
+        latency_s REAL, events TEXT, citations TEXT)""")
+    con.execute("""CREATE TABLE IF NOT EXISTS mr_feedback (
+        id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL DEFAULT (datetime('now')),
+        run_id TEXT, verdict TEXT, comment TEXT)""")
+    return con
+
+
+def _persist_run(run_id: str, question: str, answer: str, latency_s: float,
+                 events: list[dict], citations: list[dict]) -> None:
+    with _db_lock:
+        con = _db()
+        con.execute(
+            "INSERT OR REPLACE INTO mr_runs (run_id, question, answer, provider, git_sha, latency_s, events, citations) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (run_id, question, answer, PROVIDER, _git_sha(), latency_s,
+             json.dumps(events, ensure_ascii=False, default=str),
+             json.dumps(citations, ensure_ascii=False)),
+        )
+        con.commit()
+        con.close()
+
+
+def _git_sha() -> str:
+    import subprocess
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                           cwd=str(Path(__file__).parent), capture_output=True, text=True, timeout=5)
+        return r.stdout.strip() or "unknown"
+    except Exception:
+        return "unknown"
+
+
 # ── SSE run ───────────────────────────────────────────────────────────────────
 
 def _sse(payload: dict) -> str:
@@ -157,14 +446,30 @@ def _sse(payload: dict) -> str:
     return f"data: {json.dumps(payload, ensure_ascii=False, default=str)}\n\n"
 
 
+def _client_event(ev: dict) -> dict:
+    """Transform an internal tool_event into its SSE shape: rename llm_call→llm
+    and, for tool_results, attach graph_refs (retrieved section refs, for the
+    Graflinse). content_full rides along for the I/O drill-down."""
+    out = dict(ev)
+    if out.get("type") == "llm_call":
+        out["type"] = "llm"
+    elif out.get("type") == "tool_result":
+        out["graph_refs"] = _refs_from_tool_output(out.get("content_full") or "")
+    return out
+
+
 def _run_events(messages: list[dict]):
     """Generator of SSE strings for one agent run. stream_agent_answer runs in a
     worker thread; its on_tool_event callback (called with the full, growing
-    tool_events list) is diffed into per-event SSE messages, then the final
-    answer + done are emitted. Every event is a pure record — the frontend
-    rebuilds all four layers as f(event_log, t)."""
+    tool_events list) is diffed into per-event SSE messages; then citations +
+    answer + done are emitted and the whole run is persisted for later replay.
+    Every event is a pure record — the frontend rebuilds all layers as
+    f(event_log, t)."""
     q: queue.Queue = queue.Queue()
     t0 = time.perf_counter()
+    run_id = uuid.uuid4().hex[:12]
+    question = messages[-1]["content"] if messages else ""
+    client_events: list[dict] = []  # everything we send, for persistence
 
     def _worker():
         try:
@@ -179,8 +484,6 @@ def _run_events(messages: list[dict]):
             answer, tool_events = stream_agent_answer(
                 AGENT_EXECUTOR, messages, on_tool_event=_on_event
             )
-            # Flush trailing events the callback never delivered (the final,
-            # tool-call-less llm_call is appended but does not fire on_event).
             for ev in tool_events[sent:]:
                 q.put(("event", ev))
             totals = {"input_tokens": 0, "output_tokens": 0}
@@ -188,6 +491,7 @@ def _run_events(messages: list[dict]):
                 if ev.get("type") == "llm_call":
                     totals["input_tokens"] += int(ev.get("input_tokens") or 0)
                     totals["output_tokens"] += int(ev.get("output_tokens") or 0)
+            q.put(("citations", resolve_citations(answer)))
             q.put(("answer", answer))
             q.put(("done", {"latency_s": round(time.perf_counter() - t0, 3), **totals}))
         except Exception as exc:  # noqa: BLE001
@@ -196,27 +500,43 @@ def _run_events(messages: list[dict]):
 
     threading.Thread(target=_worker, daemon=True).start()
 
-    yield _sse({
-        "type": "run_start",
-        "provider": PROVIDER,
-        "question": messages[-1]["content"] if messages else "",
-        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-    })
+    start_ev = {
+        "type": "run_start", "run_id": run_id, "provider": PROVIDER,
+        "question": question, "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    client_events.append(start_ev)
+    yield _sse(start_ev)
 
+    answer_text = ""
+    citations: list[dict] = []
     while True:
         kind, payload = q.get()
         if kind == "event":
-            ev = dict(payload)
-            # Rename llm_call → llm for the client; pass others through as-is.
-            if ev.get("type") == "llm_call":
-                ev["type"] = "llm"
+            ev = _client_event(payload)
+            client_events.append(ev)
+            yield _sse(ev)
+        elif kind == "citations":
+            citations = payload
+            ev = {"type": "citations", "items": payload}
+            client_events.append(ev)
             yield _sse(ev)
         elif kind == "answer":
-            yield _sse({"type": "answer", "text": payload})
+            answer_text = payload
+            ev = {"type": "answer", "text": payload}
+            client_events.append(ev)
+            yield _sse(ev)
         elif kind == "error":
             yield _sse({"type": "error", "message": payload})
         elif kind == "done":
-            yield _sse({"type": "done", **(payload or {})})
+            done_ev = {"type": "done", "run_id": run_id, **(payload or {})}
+            client_events.append(done_ev)
+            yield _sse(done_ev)
+            try:
+                _persist_run(run_id, question, answer_text,
+                             float((payload or {}).get("latency_s") or 0.0),
+                             client_events, citations)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  run persist failed: {exc}", flush=True)
             break
 
 
@@ -250,6 +570,105 @@ async def ask(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── E2: graph lens, drill-down, citations, feedback, history ──────────────────
+
+@app.post("/api/graph/subgraph")
+async def graph_subgraph(request: Request):
+    """Resolve retrieved section refs → structured subgraph (Graflinsen)."""
+    body = await request.json()
+    refs = body.get("refs") or []
+    answer = body.get("answer") or ""
+    try:
+        return JSONResponse(build_subgraph(refs, answer))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc), "laws": [], "sections": [], "paragraphs": [], "cites": []})
+
+
+@app.get("/api/graph/node/{element_id:path}")
+def graph_node(element_id: str):
+    """Full provision text + validity + ELI uri for the node inspector."""
+    try:
+        return JSONResponse(node_detail(element_id))
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"found": False, "error": str(exc)})
+
+
+@app.post("/api/run/{run_id}/analyze")
+async def run_analyze(run_id: str, request: Request):
+    """Cheap AI analysis of one LLM call's context (Feedback-round-1 #3). The
+    deterministic search runs client-side; this endpoint answers semantic
+    questions, always citing which context block supports the answer."""
+    body = await request.json()
+    question = (body.get("question") or "").strip()
+    context = body.get("context") or ""
+    if not question or not context:
+        return JSONResponse({"error": "Provide 'question' and 'context'."}, status_code=400)
+    prompt = (
+        "Du analyserer den KONTEKST, en sprogmodel fik. Svar KUN ud fra konteksten nedenfor. "
+        "Er svaret ikke i konteksten, så sig det klart. Citér den relevante sætning ordret.\n\n"
+        f"SPØRGSMÅL: {question}\n\n=== KONTEKST ===\n{context[:12000]}"
+    )
+    try:
+        from eval_run import build_judge_llm  # reuse the cheap hosted judge model
+    except Exception:
+        build_judge_llm = None
+    try:
+        llm = build_judge_llm() if build_judge_llm else None
+        if llm is None:
+            return JSONResponse({"error": "Ingen analysemodel tilgængelig."}, status_code=503)
+        resp = llm.invoke(prompt)
+        text = getattr(resp, "content", None) or str(resp)
+        if isinstance(text, list):
+            text = " ".join(b.get("text", "") for b in text if isinstance(b, dict))
+        return JSONResponse({"answer": text})
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+
+@app.get("/api/traces")
+def traces():
+    """Recent runs for the history list (newest first)."""
+    with _db_lock:
+        con = _db()
+        rows = con.execute(
+            "SELECT run_id, ts, question, provider, latency_s FROM mr_runs ORDER BY ts DESC LIMIT 30"
+        ).fetchall()
+        con.close()
+    return JSONResponse([dict(r) for r in rows])
+
+
+@app.get("/api/traces/{run_id}")
+def trace(run_id: str):
+    """A saved run's full event log + citations, for identical replay."""
+    with _db_lock:
+        con = _db()
+        row = con.execute("SELECT * FROM mr_runs WHERE run_id = ?", (run_id,)).fetchone()
+        con.close()
+    if not row:
+        return JSONResponse({"error": "not found"}, status_code=404)
+    return JSONResponse({
+        "run_id": row["run_id"], "ts": row["ts"], "question": row["question"],
+        "answer": row["answer"], "provider": row["provider"], "latency_s": row["latency_s"],
+        "events": json.loads(row["events"] or "[]"),
+        "citations": json.loads(row["citations"] or "[]"),
+    })
+
+
+@app.post("/api/feedback")
+async def feedback(request: Request):
+    body = await request.json()
+    verdict = body.get("verdict")
+    if verdict not in ("up", "down"):
+        return JSONResponse({"error": "verdict must be 'up' or 'down'."}, status_code=400)
+    with _db_lock:
+        con = _db()
+        con.execute("INSERT INTO mr_feedback (run_id, verdict, comment) VALUES (?,?,?)",
+                    (body.get("run_id"), verdict, (body.get("comment") or "")[:2000]))
+        con.commit()
+        con.close()
+    return JSONResponse({"ok": True})
 
 
 # ── Static frontend (mounted last so /api/* wins) ─────────────────────────────

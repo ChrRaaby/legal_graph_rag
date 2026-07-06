@@ -1589,6 +1589,14 @@ def stream_agent_answer(
                 preview = raw_content
                 if isinstance(raw_content, str) and len(raw_content) > 1200:
                     preview = raw_content[:1200] + "..."
+                # content_full: the untruncated tool output, kept alongside the
+                # preview purely as trace richness (the Maskinrummet UI's I/O
+                # drill-down + graph-ref resolution need it). Additive only — it
+                # does NOT change what the model sees or the agent's behavior;
+                # capped so a pathological payload can't bloat the event log.
+                content_full = raw_content
+                if isinstance(raw_content, str) and len(raw_content) > 40000:
+                    content_full = raw_content[:40000] + "…[afkortet]"
 
                 tool_events.append(
                     {
@@ -1598,6 +1606,7 @@ def stream_agent_answer(
                         "tool_name": tool_name,
                         "duration_s": duration_s,
                         "content_preview": preview,
+                        "content_full": content_full,
                     }
                 )
                 llm_call_start = time.perf_counter()
