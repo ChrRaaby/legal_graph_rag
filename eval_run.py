@@ -85,17 +85,26 @@ from app import build_runtime, stream_agent_answer, log_trajectory, resolve_llm_
 def _git_sha() -> str:
     """Short git commit hash of the working tree HEAD, for run provenance
     (so eval results can be attributed to the exact app version that produced
-    them). Falls back to 'unknown' outside a git repo or if git is unavailable
-    — this must never abort a run."""
+    them). Appends '-dirty' when tracked files have uncommitted changes —
+    otherwise a run made mid-experiment silently misattributes itself to the
+    clean HEAD. Falls back to 'unknown'; must never abort a run."""
     import subprocess
+    cwd = str(Path(__file__).parent)
     try:
         result = subprocess.run(
             ["git", "rev-parse", "--short", "HEAD"],
-            cwd=str(Path(__file__).parent),
-            capture_output=True, text=True, timeout=5,
+            cwd=cwd, capture_output=True, text=True, timeout=5,
         )
         sha = result.stdout.strip()
-        return sha if result.returncode == 0 and sha else "unknown"
+        if result.returncode != 0 or not sha:
+            return "unknown"
+        dirty = subprocess.run(
+            ["git", "status", "--porcelain", "-uno"],
+            cwd=cwd, capture_output=True, text=True, timeout=5,
+        )
+        if dirty.returncode == 0 and dirty.stdout.strip():
+            sha += "-dirty"
+        return sha
     except Exception:
         return "unknown"
 

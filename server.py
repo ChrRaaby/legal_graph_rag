@@ -429,11 +429,21 @@ def _persist_run(run_id: str, question: str, answer: str, latency_s: float,
 
 
 def _git_sha() -> str:
+    """Short HEAD hash, '-dirty' when tracked files are modified (matches
+    eval_run._git_sha so live-run and eval provenance read the same way)."""
     import subprocess
+    cwd = str(Path(__file__).parent)
     try:
         r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
-                           cwd=str(Path(__file__).parent), capture_output=True, text=True, timeout=5)
-        return r.stdout.strip() or "unknown"
+                           cwd=cwd, capture_output=True, text=True, timeout=5)
+        sha = r.stdout.strip()
+        if not sha:
+            return "unknown"
+        d = subprocess.run(["git", "status", "--porcelain", "-uno"],
+                           cwd=cwd, capture_output=True, text=True, timeout=5)
+        if d.returncode == 0 and d.stdout.strip():
+            sha += "-dirty"
+        return sha
     except Exception:
         return "unknown"
 
