@@ -165,6 +165,16 @@ AGENT_RETRIEVAL_K = int(os.getenv("AGENT_RETRIEVAL_K", 10))
 AGENT_HISTORY_MESSAGES = int(os.getenv("AGENT_HISTORY_MESSAGES", 20))
 DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
 
+# C4 cross-encoder reranker (over the vector hits in retrieve_text_with_context).
+# Escape hatch: RERANK_TOP=0 or RERANKER_DEVICE=off disables it entirely, giving a
+# clean A/B without code changes. Default device is CPU on purpose: for the local
+# gemma4:26b run the 4090 is already ~16-20 GB occupied by Ollama, so a CUDA
+# reranker in WSL would OOM (backlog C4). For a hosted flash run (no local LLM on
+# the GPU) RERANKER_DEVICE=cuda is fine and fast.
+RERANKER_MODEL = os.getenv("RERANKER_MODEL", "BAAI/bge-reranker-v2-m3")
+RERANKER_DEVICE = os.getenv("RERANKER_DEVICE", "cpu")
+RERANK_TOP = int(os.getenv("RERANK_TOP", 5))
+
 NETWORK_GRAPH_HEIGHT = 620
 
 
@@ -417,6 +427,33 @@ def resolve_llm_provider(provider: str | None = None) -> str | None:
     )
 
 
+_RERANKER_CACHE: dict[tuple[str, str], object] = {}
+
+
+def _load_reranker(model_name: str = RERANKER_MODEL, device: str = RERANKER_DEVICE):
+    """Load (and cache) a sentence_transformers CrossEncoder for reranking vector
+    hits in retrieve_text_with_context. Returns None when disabled or on any
+    failure — the retrieval path then falls through to today's (unranked)
+    behavior, so the agent never breaks if the model can't load.
+
+    Guarded/optional per backlog C4: first use downloads ~2.3 GB to the HF cache.
+    Cached by (model, device) so repeated build_runtime() calls (e.g. eval) don't
+    reload. device="off" (or RERANK_TOP<=0, checked at call site) disables it."""
+    if RERANK_TOP <= 0 or not device or device.lower() == "off":
+        return None
+    cache_key = (model_name, device)
+    if cache_key in _RERANKER_CACHE:
+        return _RERANKER_CACHE[cache_key]
+    try:
+        from sentence_transformers import CrossEncoder
+        reranker = CrossEncoder(model_name, device=device, max_length=512)
+    except Exception as e:  # noqa: BLE001 — never let a reranker load break retrieval
+        print(f"[reranker] load failed ({model_name} on {device}): {e} — reranking disabled")
+        reranker = None
+    _RERANKER_CACHE[cache_key] = reranker
+    return reranker
+
+
 @st.cache_resource(show_spinner=False)
 def build_runtime(provider: str | None = None):
     if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
@@ -464,6 +501,9 @@ def build_runtime(provider: str | None = None):
         cache_folder=os.path.join(os.path.dirname(__file__), "..", "models"),
         encode_kwargs={"normalize_embeddings": True},
     )
+
+    # C4 cross-encoder reranker (guarded; None when disabled or on load failure).
+    reranker = _load_reranker()
 
     cypher_prompt = PromptTemplate(
         input_variables=["schema", "question"],
@@ -890,6 +930,23 @@ Question: {question}""",
         if _direct_rows:
             existing = {(r.get("section_number"), r.get("paragraph_number")) for r in rows}
             rows = [r for r in _direct_rows if (r.get("section_number"), r.get("paragraph_number")) not in existing] + rows
+
+        # C4: cross-encoder rerank. Vector similarity + lexical §-lookup surface a
+        # broad candidate set; a cross-encoder scores each (question, passage) pair
+        # jointly and lets us keep only the most relevant rows — pure narrowing
+        # (ground rule 1): we reorder and truncate, never append output fields.
+        # This is what lets "selskabsskat" rank SEL § 17's "22 pct." snippet top
+        # where the lexical Skattesats_Opslag tool can't (backlog C6 → C4).
+        # Disabled cleanly when reranker is None (RERANK_TOP<=0 / device off / load
+        # failed), leaving the vector-ordered rows untouched.
+        if reranker is not None and RERANK_TOP > 0 and len(rows) > 1:
+            try:
+                pairs = [[q, (r.get("matched_text") or "")] for r in rows]
+                scores = reranker.predict(pairs)
+                ranked = sorted(zip(rows, scores), key=lambda rs: rs[1], reverse=True)
+                rows = [r for r, _ in ranked[:RERANK_TOP]]
+            except Exception as e:  # noqa: BLE001 — reranking must never break retrieval
+                print(f"[reranker] predict failed: {e} — returning unranked rows")
 
         # For long texts with year-specific rate schedules (e.g. LL § 16 stk. 4),
         # restructure into year-labelled sections so the model can locate the
