@@ -27,7 +27,6 @@ interface ToolCard {
   reveal: number;
   name: string;
   args: unknown;
-  preview: string;
   full: string;
   dur: number | null;
   count: number | null;
@@ -49,10 +48,8 @@ function rowCount(v: unknown): number | null {
 function buildCards(log: AgentEvent[]): Card[] {
   const cards: Card[] = [];
   const pendingCall: Record<string, AgentEvent[]> = {};
-  let llmCount = 0;
   log.forEach((ev, i) => {
     if (ev.type === "llm") {
-      llmCount++;
       cards.push({
         kind: "llm", reveal: ev.start_s * 1000, logIndex: i, thinking: ev.thinking,
         inTok: ev.input_tokens, outTok: ev.output_tokens, dur: ev.duration_s, final: ev.is_final,
@@ -65,21 +62,21 @@ function buildCards(log: AgentEvent[]): Card[] {
       const reveal = (call && call.type === "tool_call" ? call.elapsed_s : ev.elapsed_s) * 1000;
       const full = ev.content_full ?? previewStr(ev.content_preview);
       cards.push({
-        kind: "tool", reveal, name: ev.tool_name, args,
-        preview: previewStr(ev.content_preview), full, dur: ev.duration_s,
+        kind: "tool", reveal, name: ev.tool_name, args, full, dur: ev.duration_s,
         count: rowCount(ev.content_full ?? ev.content_preview),
       });
     }
   });
-  llmCount; // (kept for potential numbering; label uses running index below)
   return cards;
 }
 
-function ContextTools({ blocks, runId }: { blocks: ContextBlock[]; runId: string | null }) {
+/** Context inspector: expandable text + a deterministic search box + an
+ *  AI-analyze escalation. Used on LLM cards (the reconstructed context) and on
+ *  tool cards (the tool's own output). */
+function ContextTools({ blocks, runId, summaryLabel }: { blocks: ContextBlock[]; runId: string | null; summaryLabel: string }) {
   const [q, setQ] = useState("");
   const [verdict, setVerdict] = useState<string | null>(null);
   const [aiBusy, setAiBusy] = useState(false);
-
   const joined = useMemo(() => blocks.map((b) => `── ${b.name} ──\n${b.text}`).join("\n\n"), [blocks]);
 
   const search = () => {
@@ -95,17 +92,15 @@ function ContextTools({ blocks, runId }: { blocks: ContextBlock[]; runId: string
         return;
       }
     }
-    setVerdict(`✗ «${term}» findes IKKE i konteksten (${blocks.length} blokke søgt deterministisk).`);
+    setVerdict(`✗ «${term}» findes IKKE her (${blocks.length} blok${blocks.length === 1 ? "" : "ke"} søgt deterministisk).`);
   };
-
   const ask = async () => {
     const term = q.trim();
     if (!term) return;
     setAiBusy(true);
     setVerdict("Analyserer …");
     try {
-      const ans = await postAnalyze(runId ?? "adhoc", term, joined);
-      setVerdict(`🅰 ${ans}`);
+      setVerdict(`🅰 ${await postAnalyze(runId ?? "adhoc", term, joined)}`);
     } catch (e) {
       setVerdict(`Analysefejl: ${String(e)}`);
     } finally {
@@ -116,7 +111,7 @@ function ContextTools({ blocks, runId }: { blocks: ContextBlock[]; runId: string
   return (
     <>
       <details>
-        <summary>Vis kontekst ({blocks.length} blokke · {joined.length.toLocaleString("da-DK")} tegn)</summary>
+        <summary>{summaryLabel} ({joined.length.toLocaleString("da-DK")} tegn)</summary>
         <pre>{joined.length > 6000 ? joined.slice(0, 6000) + "\n…[afkortet]" : joined}</pre>
       </details>
       <div className="ctx-ask">
@@ -124,13 +119,12 @@ function ContextTools({ blocks, runId }: { blocks: ContextBlock[]; runId: string
           value={q}
           onChange={(e) => setQ(e.target.value)}
           onKeyDown={(e) => e.key === "Enter" && search()}
-          placeholder="Søg i konteksten: fx «§ 8 a» eller «67.500» — Enter"
-          aria-label="Søg i kontekst"
+          placeholder="Søg: fx «§ 8 a» eller «67.500» — Enter"
+          aria-label="Søg i indhold"
         />
         <button className="ctx-ai" onClick={ask} disabled={aiBusy || !q.trim()}>Spørg AI</button>
       </div>
       {verdict && <div className="ctx-verdict show">{verdict}</div>}
-      <div className="ctx-hint">Deterministisk søgning er gratis og øjeblikkelig; «Spørg AI» sender konteksten til en billig model for semantiske spørgsmål.</div>
     </>
   );
 }
@@ -138,48 +132,57 @@ function ContextTools({ blocks, runId }: { blocks: ContextBlock[]; runId: string
 export default function Tankestrom({ log, t, live, question, provider, runId }: Props) {
   const cards = useMemo(() => buildCards(log), [log]);
   const visible = (reveal: number) => t >= reveal - 1 || live;
-
-  let llmN = 0;
-  const shown = cards.filter((c) => visible(c.reveal));
+  const anyVisible = cards.some((c) => visible(c.reveal));
 
   return (
     <div className="thoughts">
-      {shown.length === 0 && (
+      {!anyVisible && (
         <div className="placeholder"><div>Modellens ræsonnement og værktøjskald vises her, mens den arbejder.</div></div>
       )}
       {cards.map((c, idx) => {
         if (!visible(c.reveal)) return null;
+        const step = idx + 1;
         if (c.kind === "llm") {
-          llmN++;
           const kr = costKr(provider, c.inTok, c.outTok);
           const blocks = reconstructContext(log, c.logIndex, question);
           return (
             <div className="th" key={idx}>
-              <div className="who">🤖 LLM · {c.final ? "svar" : `tanke ${llmN}`}</div>
-              <span>{c.thinking || <em style={{ color: "var(--ink-3)" }}>(ingen synlig ræsonnering)</em>}</span>
-              <div className="meta">
-                <span>ind {c.inTok.toLocaleString("da-DK")} tok</span>
-                <span>ud {c.outTok.toLocaleString("da-DK")} tok</span>
-                <span>{kr == null ? "lokal" : formatKr(kr)}</span>
-                <span>{c.dur.toFixed(1).replace(".", ",")} s</span>
+              <div className="th-head">
+                <span className="th-step">{step}</span>
+                <span className="who">🤖 LLM · {c.final ? "svar" : "ræsonnement"}</span>
               </div>
-              {blocks.length > 0 && <ContextTools blocks={blocks} runId={runId} />}
+              <div className="th-body">
+                <span>{c.thinking || <em style={{ color: "var(--ink-3)" }}>(ingen synlig ræsonnering)</em>}</span>
+                <div className="meta">
+                  <span>ind {c.inTok.toLocaleString("da-DK")} tok</span>
+                  <span>ud {c.outTok.toLocaleString("da-DK")} tok</span>
+                  <span>{kr == null ? "lokal" : formatKr(kr)}</span>
+                  <span>{c.dur.toFixed(1).replace(".", ",")} s</span>
+                </div>
+                {blocks.length > 0 && <ContextTools blocks={blocks} runId={runId} summaryLabel="Vis kontekst til dette kald" />}
+              </div>
             </div>
           );
         }
         return (
           <div className="th toolio" key={idx}>
-            <div className="who">🔧 {toolLabel(c.name)} · kald</div>
-            <code>{previewStr(c.args)}</code>
-            <div className="meta">
-              {c.count != null && <span>{c.count} rækker</span>}
-              <span>{c.full.length.toLocaleString("da-DK")} tegn output</span>
-              {c.dur != null && <span>{c.dur.toFixed(1).replace(".", ",")} s</span>}
+            <div className="th-head">
+              <span className="th-step">{step}</span>
+              <span className="who">🔧 {toolLabel(c.name)} · værktøjskald</span>
             </div>
-            <details>
-              <summary>Vis fuldt output</summary>
-              <pre>{c.full.length > 6000 ? c.full.slice(0, 6000) + "\n…[afkortet]" : c.full}</pre>
-            </details>
+            <div className="th-body">
+              <code>{previewStr(c.args)}</code>
+              <div className="meta">
+                {c.count != null && <span>{c.count} rækker</span>}
+                <span>{c.full.length.toLocaleString("da-DK")} tegn output</span>
+                {c.dur != null && <span>{c.dur.toFixed(1).replace(".", ",")} s</span>}
+              </div>
+              <ContextTools
+                blocks={[{ name: `${toolLabel(c.name)} · output`, text: c.full }]}
+                runId={runId}
+                summaryLabel="Vis fuldt output"
+              />
+            </div>
           </div>
         );
       })}

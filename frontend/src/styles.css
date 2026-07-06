@@ -148,7 +148,10 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
 
 /* ── E2: Graflinsen nodes/edges + inspector ───────────────────────────────── */
 .gn circle{stroke-width:1.4;transition:opacity .4s,stroke .25s}
-.gn text{fill:var(--ink-2);font:11px var(--sans)}
+/* paint-order halo: a panel-coloured stroke behind the fill cuts any edge that
+   passes behind a label, so lines never appear to run through captions. */
+.gn text{fill:var(--ink-2);font:11px var(--sans);paint-order:stroke;stroke:var(--panel);stroke-width:3px;stroke-linejoin:round}
+.gn text.lov-label{font-weight:600;fill:var(--ink)}
 .gn.dim{opacity:.4}
 .gn.hide{opacity:0;pointer-events:none}
 .gn.used circle{stroke:var(--accent);stroke-width:2.4;filter:drop-shadow(0 0 9px var(--accent))}
@@ -174,6 +177,18 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
 .np-close{position:absolute;top:8px;right:10px;color:var(--ink-3);font-size:14px}
 
 /* ── E2: Tankestrømmen cards ───────────────────────────────────────────────── */
+.thoughts{height:100%;overflow-y:auto;padding:12px 14px;display:flex;flex-direction:column;gap:14px}
+.th{flex:none;border:1px solid var(--line);border-left:3px solid var(--llm);background:var(--panel-2);border-radius:8px;font-size:13px;color:var(--ink-2);overflow:hidden}
+.th.toolio{border-left-color:var(--tool)}
+.th-head{display:flex;align-items:center;gap:9px;padding:8px 13px;border-bottom:1px solid var(--line);background:color-mix(in srgb,var(--llm) 9%,transparent)}
+.th.toolio .th-head{background:color-mix(in srgb,var(--tool) 9%,transparent)}
+.th-step{width:21px;height:21px;border-radius:50%;background:var(--llm);color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700;flex:none;font-variant-numeric:tabular-nums}
+.th.toolio .th-step{background:var(--tool)}
+.th .who{font-size:10.5px;letter-spacing:.8px;text-transform:uppercase;color:var(--llm);font-variant-numeric:tabular-nums}
+.th.toolio .who{color:var(--tool)}
+.th-body{padding:10px 13px 12px}
+.th-body>span{display:block}
+.th code{font:11.5px var(--mono);color:var(--ink);display:block;overflow-x:auto;white-space:pre-wrap;word-break:break-word}
 .th .meta{display:flex;gap:10px;flex-wrap:wrap;font:10.5px var(--mono);color:var(--ink-3);margin-top:6px;font-variant-numeric:tabular-nums}
 .th details{margin-top:6px;font-size:12px}
 .th summary{cursor:pointer;color:var(--accent);font-size:11.5px;letter-spacing:.2px}

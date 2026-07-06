@@ -113,9 +113,15 @@ export default function Graflinse({ log, answer, t, live, selectedId, onSelect }
                 style={{ cursor: n.kind === "section" ? "pointer" : "default" }}
               >
                 <circle cx={n.x} cy={n.y} r={n.r} fill={fill} stroke="var(--line)" />
-                <text x={n.x} y={n.y + n.r + 12} textAnchor="middle">
-                  {n.label}
-                </text>
+                {n.kind === "lov" ? (
+                  <text x={n.x} y={n.y - n.r - 7} textAnchor="middle" className="lov-label">
+                    {n.label}
+                  </text>
+                ) : (
+                  <text x={n.x + n.r + 5} y={n.y} textAnchor="start" dominantBaseline="central">
+                    {n.label}
+                  </text>
+                )}
               </g>
             );
           })}

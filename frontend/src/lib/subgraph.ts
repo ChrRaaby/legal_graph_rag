@@ -137,27 +137,32 @@ export function layoutGraflinse(sub: Subgraph, log: AgentEvent[]): GLayout {
     if (lawNode.revealMs === Infinity) lawNode.revealMs = 0;
   });
 
-  // Hierarchy edges law→section (thin), and CITES edges section→section (magenta).
+  // Edges are trimmed to the circle boundary so no line runs through a node,
+  // and rendered behind the (solid-filled) nodes.
   const edges: GEdge[] = [];
   for (const n of nodes) {
     if (n.kind !== "section") continue;
     const lawNode = nodes.find((m) => m.kind === "lov" && m.element_id === sectionLawId(sub, n.id));
     if (lawNode) {
+      const [ax, ay] = trim(lawNode.x, lawNode.y, n.x, n.y, lawNode.r + 1);
+      const [bx, by] = trim(n.x, n.y, lawNode.x, lawNode.y, n.r + 1);
       edges.push({
         from: lawNode.id, to: n.id, via: null, revealMs: n.revealMs,
-        d: `M${lawNode.x},${lawNode.y + lawNode.r} C${lawNode.x},${(lawNode.y + n.y) / 2} ${n.x},${(lawNode.y + n.y) / 2} ${n.x},${n.y - n.r}`,
+        d: `M${ax},${ay} C${ax},${(ay + by) / 2} ${bx},${(ay + by) / 2} ${bx},${by}`,
       });
     }
   }
   for (const c of sub.cites) {
     const a = posById.get(c.from);
     const b = posById.get(c.to);
-    if (!a || !b) continue;
-    const mx = (a.x + b.x) / 2;
-    const my = Math.max(a.y, b.y) + 46;
+    if (!a || !b || a.id === b.id) continue;
+    const cx = (a.x + b.x) / 2;
+    const cy = Math.max(a.y, b.y) + 52;
+    const [ax, ay] = trim(a.x, a.y, cx, cy, a.r + 2);
+    const [bx, by] = trim(b.x, b.y, cx, cy, b.r + 2);
     edges.push({
       from: a.id, to: b.id, via: c.via,
-      d: `M${a.x},${a.y} Q${mx},${my} ${b.x},${b.y}`,
+      d: `M${ax},${ay} Q${cx},${cy} ${bx},${by}`,
       revealMs: Math.max(a.revealMs, b.revealMs),
     });
   }
@@ -167,4 +172,12 @@ export function layoutGraflinse(sub: Subgraph, log: AgentEvent[]): GLayout {
 
 function sectionLawId(sub: Subgraph, sectionId: string): string | undefined {
   return sub.sections.find((s) => s.id === sectionId)?.law_id;
+}
+
+/** Point `d` px from (px,py) toward (tx,ty) — used to stop edges at the node rim. */
+function trim(px: number, py: number, tx: number, ty: number, d: number): [number, number] {
+  const dx = tx - px;
+  const dy = ty - py;
+  const len = Math.hypot(dx, dy) || 1;
+  return [px + (dx / len) * d, py + (dy / len) * d];
 }
