@@ -3,10 +3,23 @@
 Event-driven UI for the Danish tax-law agent. Design + scope: `../whitepapers/frontend_maskinrummet_design.md`
 and the V1 mockup `../whitepapers/mockups/maskinrummet_mockup.html`.
 
-**E1 delivers the spine:** the chat (primary use case) + **Kredsløbet** (the
-architecture map generated from runtime truth, lit live as the agent runs) +
-**Tidslinjen** (scrub to replay any moment) + the `APP_MODE` user/dev split. The
-Graflinse / Tankestrøm / Eval tabs are shelled as placeholders for E2/E3.
+**E1 delivered the spine:** chat + **Kredsløbet** (architecture map from runtime
+truth, lit live) + **Tidslinjen** (scrub to replay) + `APP_MODE` user/dev.
+
+**E2 added the lenses:**
+- **Graflinsen** — the retrieved subgraph (Law → § + CITES cross-references),
+  built live as retrieval happens (scrub-revealed), with a **node inspector**
+  (click a § → full stk text, gældende/historisk badge, retsinformation link).
+  Rendered as Law + § + CITES; stk detail lives in the inspector (a real § can
+  have >10 stk — nodes would clutter).
+- **Tankestrømmen** — reasoning + tool cards with **token/cost badges**, **I/O
+  drill-down** (full tool output; the LLM call's reconstructed context), and
+  **context search** (deterministic, instant) with an **AI-analyze** escalation.
+- **Chat** — **kilder chips** (law-aware ✓/⚠ verification, ELI deep link, click →
+  highlight the § in Graflinsen), **feedback** 👍/👎, and **history** (load and
+  replay a past run — identical `(event_log, t)` path).
+
+The Eval tab is shelled as a placeholder for E3.
 
 Everything is a pure function of `(event_log, t)`: the SSE stream fills the event
 log; one shared clock (`useRunClock`) drives every layer, so live play and

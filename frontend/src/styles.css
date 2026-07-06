@@ -146,6 +146,66 @@ header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:4px 2px
 footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
 .err{color:var(--bad);font-size:12.5px;align-self:flex-start;border:1px solid rgba(208,59,59,.4);border-radius:8px;padding:8px 12px}
 
+/* ── E2: Graflinsen nodes/edges + inspector ───────────────────────────────── */
+.gn circle{stroke-width:1.4;transition:opacity .4s,stroke .25s}
+.gn text{fill:var(--ink-2);font:11px var(--sans)}
+.gn.dim{opacity:.4}
+.gn.hide{opacity:0;pointer-events:none}
+.gn.used circle{stroke:var(--accent);stroke-width:2.4;filter:drop-shadow(0 0 9px var(--accent))}
+.gn.pick circle{stroke:var(--accent);stroke-width:2.6}
+.gn.pick text{fill:var(--ink);font-weight:600}
+.gn:hover text{fill:var(--ink)}
+.ge{stroke:var(--line);stroke-width:1.3;fill:none;transition:opacity .4s}
+.ge.cites{stroke:var(--cites);stroke-dasharray:4 4;stroke-width:1.6}
+.ge.hide{opacity:0}
+.legend{position:absolute;left:14px;bottom:10px;display:flex;gap:13px;flex-wrap:wrap;font-size:10.5px;color:var(--ink-3);background:color-mix(in srgb,var(--panel) 82%,transparent);padding:4px 10px;border-radius:7px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:4px;vertical-align:-1px}
+
+.node-panel{position:absolute;top:10px;right:10px;width:min(48%,360px);background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 14px;box-shadow:0 8px 28px rgba(0,0,0,.35);max-height:86%;overflow-y:auto}
+.node-panel h4{margin:0 0 4px;font-family:var(--serif);font-size:15px;color:var(--ink)}
+.node-panel .np-badges{display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap}
+.node-panel .np-badge{font-size:10px;border:1px solid var(--line);border-radius:999px;padding:2px 8px;color:var(--ink-2)}
+.node-panel .np-badge.ok{color:var(--good);border-color:rgba(12,163,12,.4)}
+.node-panel p{font-size:12px;color:var(--ink-2);margin:0 0 8px;line-height:1.5}
+.node-panel p b{color:var(--ink)}
+.node-panel .np-links{display:flex;gap:10px;font-size:11.5px}
+.node-panel .np-links a{color:var(--accent);text-decoration:none}
+.node-panel .np-links a:hover{text-decoration:underline}
+.np-close{position:absolute;top:8px;right:10px;color:var(--ink-3);font-size:14px}
+
+/* ── E2: Tankestrømmen cards ───────────────────────────────────────────────── */
+.th .meta{display:flex;gap:10px;flex-wrap:wrap;font:10.5px var(--mono);color:var(--ink-3);margin-top:6px;font-variant-numeric:tabular-nums}
+.th details{margin-top:6px;font-size:12px}
+.th summary{cursor:pointer;color:var(--accent);font-size:11.5px;letter-spacing:.2px}
+.th summary:hover{text-decoration:underline}
+.th details pre{font:10.5px var(--mono);color:var(--ink-2);background:var(--bg);border:1px solid var(--line);border-radius:6px;padding:8px 10px;overflow-x:auto;margin:6px 0 0;white-space:pre-wrap;word-break:break-word;max-height:260px;overflow-y:auto}
+.ctx-ask{display:flex;gap:6px;margin-top:7px}
+.ctx-ask input{flex:1;background:var(--bg);border:1px solid var(--line);border-radius:6px;color:var(--ink);font:11.5px var(--sans);padding:5px 9px}
+.ctx-ask input::placeholder{color:var(--ink-3)}
+.ctx-ai{background:var(--accent-dim);color:var(--accent);border:1px solid transparent;border-radius:6px;padding:5px 10px;font-size:11.5px}
+.ctx-ai:hover{border-color:var(--accent)}
+.ctx-ai:disabled{opacity:.5;cursor:not-allowed}
+.ctx-verdict{margin-top:5px;font-size:11.5px;color:var(--ink-2);border-left:2px solid var(--accent);padding:3px 8px}
+.ctx-hint{font-size:10px;color:var(--ink-3);margin-top:3px}
+
+/* ── E2: kilder chips + feedback ──────────────────────────────────────────── */
+.answer-tools{align-self:flex-start;display:flex;flex-direction:column;gap:8px;margin-top:-4px;max-width:92%}
+.kilde.warn{color:var(--ink-2);border-color:rgba(208,59,59,.35)}
+.kilde.warn .st{border-color:var(--bad)}
+.kilde:disabled{cursor:default;opacity:.85}
+.kilde-link{margin-left:2px;color:var(--accent);text-decoration:none;font-size:11px}
+.kilde-link:hover{text-decoration:underline}
+.fb-row{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--ink-3)}
+.fb-label{letter-spacing:.2px}
+.fb{border:1px solid var(--line);border-radius:8px;padding:2px 8px;font-size:13px;line-height:1}
+.fb:hover{border-color:var(--accent)}
+.fb.on{background:var(--accent-dim);border-color:transparent}
+.fb-thanks{color:var(--good);font-size:11.5px}
+
+/* ── E2: history select ───────────────────────────────────────────────────── */
+.history{background:var(--panel-2);color:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;font:inherit;font-size:11.5px;max-width:230px}
+.history:hover{border-color:var(--accent);color:var(--ink)}
+
 @media (max-width: 980px){
   .split{grid-template-columns:1fr}
   .stage{min-height:400px}

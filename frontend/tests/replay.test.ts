@@ -5,9 +5,13 @@
 //
 // Run:  node_modules/.bin/esbuild tests/replay.test.ts --bundle --format=esm \
 //         --platform=node --outfile=/tmp/replay.mjs && node /tmp/replay.mjs
-import { spansFromLog, runEndMs, captionAt, liveMaxMs } from "../src/lib/events";
+import {
+  spansFromLog, runEndMs, captionAt, liveMaxMs,
+  costKr, reconstructContext,
+} from "../src/lib/events";
 import type { AgentEvent } from "../src/lib/events";
 import { buildCircuit, circuitOn } from "../src/lib/circuit";
+import { refsFromLog } from "../src/lib/subgraph";
 import type { ToolInfo } from "../src/lib/api";
 import raw from "./gs25_events.json";
 
@@ -37,17 +41,20 @@ const TOOLS: ToolInfo[] = [
 console.log("replay.test — real gs-025 log, " + log.length + " events");
 
 // ── spans ────────────────────────────────────────────────────────────────────
+const nLlm = log.filter((e) => e.type === "llm").length;
+const nTool = log.filter((e) => e.type === "tool_result").length;
 const spans = spansFromLog(log);
 const llmSpans = spans.filter((s) => s.kind === "llm");
 const toolSpans = spans.filter((s) => s.kind === "tool");
-check("5 llm spans", llmSpans.length === 5, `got ${llmSpans.length}`);
-check("4 tool spans", toolSpans.length === 4, `got ${toolSpans.length}`);
+check("one llm span per llm event", llmSpans.length === nLlm, `${llmSpans.length} vs ${nLlm}`);
+check("one tool span per tool_result", toolSpans.length === nTool, `${toolSpans.length} vs ${nTool}`);
 check("all spans ordered t0<=t1", spans.every((s) => s.t1 >= s.t0));
-check("one final llm span", llmSpans.filter((s) => s.final).length === 1);
+check("exactly one final llm span", llmSpans.filter((s) => s.final).length === 1);
 
 // ── run length ───────────────────────────────────────────────────────────────
+const doneMs = ((log.find((e) => e.type === "done") as Extract<AgentEvent, { type: "done" }>).latency_s) * 1000;
 const end = runEndMs(log);
-check("runEnd == done latency (26131 ms)", Math.round(end) === 26131, `got ${end}`);
+check("runEnd == done latency", Math.round(end) === Math.round(doneMs), `${end} vs ${doneMs}`);
 check("liveMax <= runEnd", liveMaxMs(log) <= end + 1);
 
 // ── circuit layout (runtime truth) ───────────────────────────────────────────
@@ -88,6 +95,30 @@ check("caption@end says Færdig", /Færdig/.test(capEnd), capEnd);
 // live heuristic: past the last event, agent reads as thinking
 const capLive = captionAt(log.slice(0, 4), liveMaxMs(log.slice(0, 4)) + 500, true);
 check("live caption past last event = thinking", /tænker/i.test(capLive), capLive);
+
+// ── E2: new event shapes + derivations ──────────────────────────────────────
+const toolResults = log.filter((e) => e.type === "tool_result") as Extract<AgentEvent, { type: "tool_result" }>[];
+check("tool_results carry graph_refs", toolResults.every((e) => Array.isArray(e.graph_refs)));
+check("tool_results carry content_full", toolResults.every((e) => typeof e.content_full === "string" && e.content_full.length > 0));
+const refs = refsFromLog(log);
+check("refsFromLog extracts section refs", refs.length > 0, `got ${refs.length}`);
+check("refs have num + (uri or title)", refs.every((r) => r.num && (r.uri || r.title)));
+
+const citEv = log.find((e) => e.type === "citations") as Extract<AgentEvent, { type: "citations" }> | undefined;
+check("citations event present", !!citEv && citEv.items.length > 0);
+check("citations have label + verified flag", !!citEv && citEv.items.every((c) => c.label && typeof c.verified === "boolean"));
+
+const runStart = log.find((e) => e.type === "run_start") as Extract<AgentEvent, { type: "run_start" }>;
+check("run_start carries run_id", !!runStart.run_id);
+
+// cost: hosted provider yields a positive kr; local is null
+check("costKr hosted > 0", (costKr("gemini:gemini-2.5-flash", 10000, 1000) ?? 0) > 0);
+check("costKr local is null", costKr("ollama", 10000, 1000) === null);
+
+// context reconstruction: the final llm call sees the preceding tool outputs
+const lastLlmIdx = log.map((e, i) => (e.type === "llm" ? i : -1)).filter((i) => i >= 0).at(-1)!;
+const ctx = reconstructContext(log, lastLlmIdx, "gs-025 spørgsmål");
+check("context has question + >=1 tool block", ctx.length >= 2 && ctx.some((b) => b.name.includes("output")));
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

@@ -18,7 +18,7 @@ const REDUCED =
 /** The shared clock. During `live` it follows the wall clock (so the agent's
  *  thinking reads as motion even between events); on `done` it snaps to the end
  *  and becomes a scrubbable replay of the same log. Every layer renders at f(t). */
-export function useRunClock(phase: RunPhase, log: AgentEvent[]): RunClock {
+export function useRunClock(phase: RunPhase, log: AgentEvent[], runId?: string | null): RunClock {
   const [t, setT] = useState(0);
   const [playing, setPlaying] = useState(false);
   const raf = useRef(0);
@@ -40,7 +40,9 @@ export function useRunClock(phase: RunPhase, log: AgentEvent[]): RunClock {
     return () => cancelAnimationFrame(raf.current);
   }, [phase]);
 
-  // Entering replay: stop, snap to the end so the whole run is visible.
+  // Entering replay OR loading a different run: stop, snap to the end so the
+  // whole run is visible. runId in the deps makes a freshly-loaded historical
+  // trace re-snap even when the phase was already "replay".
   useEffect(() => {
     if (phase === "replay") {
       cancelAnimationFrame(raf.current);
@@ -49,7 +51,7 @@ export function useRunClock(phase: RunPhase, log: AgentEvent[]): RunClock {
     } else if (phase === "idle") {
       setT(0);
     }
-  }, [phase]);
+  }, [phase, runId]);
 
   const play = useCallback(() => {
     if (phase !== "replay") return;

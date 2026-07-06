@@ -2,8 +2,22 @@
 // (event_log, t) — this module owns the log shape and the time-derived views
 // (timeline spans, run end, caption steps) the components read.
 
+export interface GraphRef {
+  uri: string;
+  title: string;
+  num: string;
+}
+export interface Citation {
+  label: string;
+  lov: string;
+  section_number: string;
+  verified: boolean;
+  uri: string | null;
+  element_id: string | null;
+}
+
 export type AgentEvent =
-  | { type: "run_start"; provider: string; question: string; ts: string }
+  | { type: "run_start"; run_id?: string; provider: string; question: string; ts: string }
   | {
       type: "llm";
       elapsed_s: number;
@@ -23,10 +37,35 @@ export type AgentEvent =
       tool_name: string;
       duration_s: number | null;
       content_preview: unknown;
+      content_full?: string;
+      graph_refs?: GraphRef[];
     }
+  | { type: "citations"; items: Citation[] }
   | { type: "answer"; text: string }
-  | { type: "done"; latency_s: number; input_tokens?: number; output_tokens?: number }
+  | { type: "done"; run_id?: string; latency_s: number; input_tokens?: number; output_tokens?: number }
   | { type: "error"; message: string };
+
+// ── Token cost (Feedback-round-1 #4) ─────────────────────────────────────────
+// USD per 1M tokens; local Ollama has no marginal cost. Rough public list
+// prices — for a "hvad koster det"-signal in the UI, not billing.
+const PRICE_USD: { match: string; in: number; out: number }[] = [
+  { match: "gemini-2.5-flash", in: 0.3, out: 2.5 },
+  { match: "gemini-2.5-pro", in: 1.25, out: 10 },
+  { match: "gemini-3", in: 0.5, out: 4 },
+  { match: "gpt-4o-mini", in: 0.15, out: 0.6 },
+];
+const USD_TO_DKK = 6.9;
+
+export function costKr(provider: string, inTok: number, outTok: number): number | null {
+  if (!provider || provider.startsWith("ollama")) return null; // local = free
+  const row = PRICE_USD.find((p) => provider.includes(p.match)) ?? PRICE_USD[0];
+  return ((inTok * row.in + outTok * row.out) / 1e6) * USD_TO_DKK;
+}
+
+export function formatKr(kr: number): string {
+  if (kr < 0.01) return "<0,01 kr.";
+  return `~${kr.toFixed(2).replace(".", ",")} kr.`;
+}
 
 const TOOL_LABELS: Record<string, string> = {
   Contextual_Text_Retriever: "Kontekst-søgning",
@@ -172,6 +211,31 @@ export function captionSteps(log: AgentEvent[]): CaptionStep[] {
   }
   steps.sort((a, b) => a.t - b.t);
   return steps;
+}
+
+export interface ContextBlock {
+  name: string;
+  text: string;
+}
+
+/** Reconstruct the context an LLM call saw, deterministically from the log:
+ *  the question plus every tool output that preceded this call. An approximation
+ *  of the true prompt (system prompt aside) — enough to search "is § X / this
+ *  amount in what the model was given?". */
+export function reconstructContext(
+  log: AgentEvent[],
+  beforeIndex: number,
+  question: string,
+): ContextBlock[] {
+  const blocks: ContextBlock[] = [];
+  if (question) blocks.push({ name: "Brugerens spørgsmål", text: question });
+  for (let i = 0; i < beforeIndex && i < log.length; i++) {
+    const ev = log[i];
+    if (ev.type === "tool_result" && ev.content_full) {
+      blocks.push({ name: `${toolLabel(ev.tool_name)} · output`, text: ev.content_full });
+    }
+  }
+  return blocks;
 }
 
 export function captionAt(log: AgentEvent[], tMs: number, live: boolean): string {
