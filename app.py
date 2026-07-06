@@ -196,6 +196,31 @@ def _parse_regulering_row(text: str) -> dict:
     }
 
 
+# Law-name → title stem, for resolving a "lov" argument (abbreviation or genitive
+# form) to a Legislation by title/description containment. Used by the
+# Citation_Network_Explorer tool (C1).
+_CITATION_ALIASES = {
+    "ll": "ligningslov", "psl": "personskattelov", "sel": "selskabsskattelov",
+    "ksl": "kildeskattelov", "ml": "momslov", "abl": "aktieavancebeskatningslov",
+    "kgl": "kursgevinstlov", "al": "afskrivningslov", "fbl": "fondsbeskatningslov",
+    "askl": "aktiesparekontolov", "bal": "boafgiftslov",
+    # the statutory name for momsloven — the graph's description says "Momsloven"
+    "merværdiafgiftslov": "momslov",
+}
+
+
+def _citation_law_stem(lov: str) -> str:
+    s = (lov or "").strip().lower()
+    if s in _CITATION_ALIASES:
+        return _CITATION_ALIASES[s]
+    for suf in ("lovens", "loven", "lov"):
+        if s.endswith(suf):
+            s = s[: -len(suf)] + "lov"
+            break
+    # aliases apply post-stemming too ("merværdiafgiftsloven" → "merværdiafgiftslov" → "momslov")
+    return _CITATION_ALIASES.get(s, s)
+
+
 # Set in build_runtime() so the deterministic hallucination guard in
 # stream_agent_answer() can query the graph without changing the public
 # (agent_executor, chat_messages) signature that eval_run.py depends on.
@@ -914,31 +939,47 @@ Question: {question}""",
         return retrieve_text_with_context(payload)
 
     def citation_reasoning(payload: str):
+        """Section-level CITES lookup (C1): resolve a (lov, paragraf) to its
+        current-version Section and return the §§ it cites (citerer) and the §§
+        that cite it (citeret af), each resolved back to its law — across laws.
+        Backed by the 1694 (:Section)-[:CITES]->(:Section) edges. Replaces the old
+        Legislation→Legislation query that matched zero edges (dead tool)."""
         data = _parse_payload(payload)
-        q = data.get("q", "")
-        k = int(data.get("k", AGENT_RETRIEVAL_K))
-        hits = _vector_hits(q, k=k)
-        if not hits:
-            return []
-
-        query = """
-        UNWIND $hits AS h
-        MATCH (hit) WHERE elementId(hit) = h.node_id
-        OPTIONAL MATCH (source_direct:Legislation) WHERE elementId(source_direct) = h.node_id
-        OPTIONAL MATCH (source_ctx:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION|HAS_PARAGRAPH*1..6]->(hit)
-        WITH h, coalesce(source_direct, source_ctx) AS source
-        WHERE source IS NOT NULL
-        OPTIONAL MATCH (source)-[r:CITES]->(target:Legislation)
-        RETURN source.title AS source_title,
-               source.uri AS source_uri,
-               target.title AS target_title,
-               target.uri AS target_uri,
-               type(r) AS relationship_type,
-               h.score AS vector_score
-        ORDER BY vector_score DESC
-        LIMIT 20
-        """
-        return analysis.run_query(query, {"hits": hits})
+        lov = data.get("lov") or data.get("q", "")
+        paragraf = str(data.get("paragraf") or data.get("num") or "").strip()
+        if not lov or not paragraf:
+            return {"fejl": "Angiv både 'lov' (f.eks. 'ligningsloven' eller 'LL') og 'paragraf' (f.eks. '16 A')."}
+        stem = _citation_law_stem(lov)
+        rows = analysis.run_query(
+            """
+            MATCH (l:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(s:Section)
+            WHERE toLower(coalesce(l.description, l.title, '')) CONTAINS $stem
+              AND coalesce(l.is_current, true)
+              AND toUpper(trim(s.number)) = toUpper($num)
+            WITH s LIMIT 1
+            OPTIONAL MATCH (s)-[c:CITES]->(t:Section)
+            OPTIONAL MATCH (tl:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(t)
+              WHERE coalesce(tl.is_current, true)
+            WITH s, collect(DISTINCT CASE WHEN t IS NULL THEN NULL ELSE
+                 {lov: coalesce(tl.description, tl.title), paragraf: t.number, via: c.via} END) AS out_raw
+            OPTIONAL MATCH (src:Section)-[c2:CITES]->(s)
+            OPTIONAL MATCH (sl:Legislation)-[:HAS_PART|HAS_CHAPTER|HAS_SECTION*1..6]->(src)
+              WHERE coalesce(sl.is_current, true)
+            WITH s, out_raw, collect(DISTINCT CASE WHEN src IS NULL THEN NULL ELSE
+                 {lov: coalesce(sl.description, sl.title), paragraf: src.number, via: c2.via} END) AS in_raw
+            RETURN s.number AS sec,
+                   [x IN out_raw WHERE x IS NOT NULL][0..15] AS citerer,
+                   [x IN in_raw WHERE x IS NOT NULL][0..15] AS citeret_af
+            """,
+            {"stem": stem, "num": paragraf},
+        )
+        if not rows or rows[0].get("sec") is None:
+            return {"lov": lov, "paragraf": paragraf,
+                    "resultat": f"Fandt ingen § {paragraf} i {lov} i den gældende version (eller ingen krydshenvisninger).",
+                    "citerer": [], "citeret_af": []}
+        r = rows[0]
+        return {"lov": lov, "paragraf": r["sec"],
+                "citerer": r["citerer"], "citeret_af": r["citeret_af"]}
 
     def supersedes_chain(payload: str):
         data = _parse_payload(payload)
@@ -1102,11 +1143,11 @@ Question: {question}""",
         return resolve_legislation_title(json.dumps({"q": q, "limit": limit}))
 
     class CitationNetworkExplorerInput(BaseModel):
-        q: str = Field(..., description="Natural language query.")
-        k: int = Field(default=AGENT_RETRIEVAL_K, ge=1, le=100, description="Top-k vector hits.")
+        lov: str = Field(..., description="Lovens navn eller forkortelse, f.eks. 'ligningsloven' eller 'LL'.")
+        paragraf: str = Field(..., description="Paragrafnummeret, f.eks. '16 A', '8 a' eller '12'.")
 
-    def citation_reasoning_structured(q: str, k: int = AGENT_RETRIEVAL_K):
-        return citation_reasoning(json.dumps({"q": q, "k": k}))
+    def citation_reasoning_structured(lov: str, paragraf: str):
+        return citation_reasoning(json.dumps({"lov": lov, "paragraf": paragraf}))
 
     class SupersedesNetworkInput(BaseModel):
         q: str = Field(..., description="Legislation title or URI fragment.")
@@ -1280,7 +1321,14 @@ Question: {question}""",
         name="Citation_Network_Explorer",
         func=citation_reasoning_structured,
         args_schema=CitationNetworkExplorerInput,
-        description="Citation expansion tool. Starts from vector-relevant source legislation and returns citation edges to target legislation (`source_*`, `target_*`, relationship type, vector score). Use for 'what cites what' questions.",
+        description=(
+            "Find de formelle krydshenvisninger for en bestemt paragraf: hvilke §§ den "
+            "HENVISER TIL (citerer), og hvilke §§ der HENVISER TIL den (citeret af) — på "
+            "tværs af love. Input: lov (navn eller forkortelse, f.eks. 'ligningsloven'/'LL') "
+            "og paragraf (f.eks. '16 A'). Brug dette til at følge citationskæder mellem love, "
+            "f.eks. fra en materiel regel til den lov/§ der fastsætter beskatningen. Hvert "
+            "resultat har lov, paragraf og 'via' (det citerende tekststykke)."
+        ),
     )
     supersedes_tool = StructuredTool.from_function(
         name="Supersedes_Network_Explorer",
