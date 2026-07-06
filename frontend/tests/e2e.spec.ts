@@ -8,9 +8,9 @@ test("live run then scrub", async ({ page }) => {
 
   await page.goto("/");
 
-  // React mounted + runtime-truth architecture fetched.
+  // React mounted + runtime-truth architecture fetched (the graph-stats badge).
   await expect(page.locator(".brand")).toContainText("Skattegraf");
-  await expect(page.locator(".badge")).toContainText("love");
+  await expect(page.locator(".badge", { hasText: "love" })).toBeVisible();
 
   // Ask a short question and send.
   await page.locator(".composer textarea").fill("Hvad er momssatsen i Danmark?");
