@@ -8,7 +8,9 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law. The Streamlit app (`app.py`) is the main deliverable.
+A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law.
+
+**Primary UI = the Maskinrummet frontend** (`server.py` FastAPI + `frontend/` React; run `uvicorn server:app` then `npm --prefix frontend run dev`). `app.py` remains the **single source of the agent runtime** (`build_runtime`, `stream_agent_answer`, tools, guards) — server.py and eval_run.py import it under a Streamlit stub. Its Streamlit UI (sidebar views, chat, eval panel) is **legacy/deprecated** as of E3 (superseded by Maskinrummet) but NOT removed: the runtime functions live in the same file and the module-level Streamlit code is load-bearing for the stub-import. Removing the Streamlit UI is a deferred, careful refactor (see backlog Phase E). Do not treat the Streamlit app as the deliverable.
 
 Laws in the graph: Personskatteloven (PSL), Ligningsloven (LL, 4 versions incl. 2025/1500), Selskabsskatteloven (SEL), Kildeskatteloven (KSL, 2 versions), Momsloven (ML), Aktieavancebeskatningsloven (ABL), Kursgevinstloven (KGL), Afskrivningsloven (AL), Fondsbeskatningsloven (FBL), Aktiesparekontoloven (ASKL), LOV 482/2024, PSL § 20 reguleringstabel 2025–2026.
 

@@ -6,6 +6,7 @@ import type { RunClock } from "../lib/useRunClock";
 import Kredslob from "./Kredslob";
 import Graflinse from "./Graflinse";
 import Tankestrom from "./Tankestrom";
+import Eval from "./Eval";
 import Tidslinjen from "./Tidslinjen";
 
 export type TabId = "kredslob" | "graflinse" | "tanker" | "evalx";
@@ -54,7 +55,7 @@ export default function Maskinrummet({
   }, [log, t, clock.live]);
 
   const counts: Record<TabId, string> = {
-    kredslob: "", graflinse: nGraf ? String(nGraf) : "", tanker: nTanker ? String(nTanker) : "", evalx: "E3",
+    kredslob: "", graflinse: nGraf ? String(nGraf) : "", tanker: nTanker ? String(nTanker) : "", evalx: "",
   };
 
   return (
@@ -82,11 +83,7 @@ export default function Maskinrummet({
           <Tankestrom log={log} t={t} live={clock.live} question={question} provider={provider} runId={runId} />
         </div>
         <div className={`layer${tab === "evalx" ? " active" : ""}`} role="tabpanel">
-          <div className="placeholder">
-            <span className="tag">E3</span>
-            <div className="big">Eval</div>
-            <div>Golden-set-instrumentbræt: beståelse pr. dimension og kørsler pr. model, sæt-version og app-commit. Kommer i næste fase.</div>
-          </div>
+          {tab === "evalx" && <Eval />}
         </div>
       </div>
 

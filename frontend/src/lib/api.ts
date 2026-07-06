@@ -58,6 +58,49 @@ export interface TraceSummary {
   provider: string;
   latency_s: number;
 }
+
+// ── E3: eval lens + tool health ──────────────────────────────────────────────
+export interface EvalDimRow {
+  value: string;
+  pass: number;
+  total: number;
+}
+export interface EvalRun {
+  name: string;
+  model: string;
+  set_version: string;
+  git_sha: string;
+  ts: string;
+  repeat: number;
+  n_items: number;
+  n_records: number;
+  mean_pass: number;
+  pass_pct: number;
+  dims: { category: EvalDimRow[]; difficulty: EvalDimRow[]; behavior: EvalDimRow[] };
+}
+export interface EvalItem {
+  id: string;
+  category: string;
+  difficulty: string;
+  expected_behavior: string;
+  question: string;
+  runs: number;
+  passes: number;
+  answer: string;
+  scores: {
+    must_contain: boolean;
+    must_not_contain: boolean;
+    behavior: boolean;
+    citation: boolean;
+    detected_behavior: string;
+  };
+}
+export interface ToolHealthRow {
+  tool: string;
+  calls: number;
+  empty_rate: number;
+  mean_duration_s: number | null;
+}
 export interface Architecture {
   app_mode: "user" | "dev";
   provider: string;
@@ -117,6 +160,24 @@ export async function postFeedback(runId: string | null, verdict: "up" | "down",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ run_id: runId, verdict, comment }),
   });
+}
+
+export async function fetchEvalRuns(): Promise<EvalRun[]> {
+  const res = await fetch("/api/eval/runs");
+  if (!res.ok) throw new Error(`eval/runs ${res.status}`);
+  return (await res.json()) as EvalRun[];
+}
+
+export async function fetchEvalItems(name: string): Promise<EvalItem[]> {
+  const res = await fetch(`/api/eval/runs/${encodeURIComponent(name)}`);
+  if (!res.ok) throw new Error(`eval items ${res.status}`);
+  return ((await res.json()).items ?? []) as EvalItem[];
+}
+
+export async function fetchToolHealth(): Promise<{ tools: ToolHealthRow[]; n_runs: number }> {
+  const res = await fetch("/api/tools/health");
+  if (!res.ok) throw new Error(`tools/health ${res.status}`);
+  return (await res.json()) as { tools: ToolHealthRow[]; n_runs: number };
 }
 
 export async function postAnalyze(runId: string, question: string, context: string): Promise<string> {

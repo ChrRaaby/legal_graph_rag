@@ -50,5 +50,12 @@ test("live run, lenses, kilder, feedback", async ({ page }) => {
   await expect(page.locator(".th .meta").first()).toBeVisible();
   await expect(page.locator(".th details summary").first()).toBeVisible();
 
+  // Eval lens: dimension matrix + items table + tool-health render from real data.
+  await page.locator(".tab", { hasText: "Eval" }).click();
+  await expect(page.locator(".eval-selects select").first()).toBeVisible();
+  await expect(page.locator(".dimtable .etbl tbody tr").first()).toBeVisible();
+  await expect(page.locator(".etbl.items .item-row").first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByText("Værktøjs-sundhed")).toBeVisible();
+
   expect(errors, "no uncaught page errors").toEqual([]);
 });

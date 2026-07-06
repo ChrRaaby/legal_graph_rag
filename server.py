@@ -656,6 +656,174 @@ def trace(run_id: str):
     })
 
 
+# ── E3: eval lens + tool health ───────────────────────────────────────────────
+
+def _infer_model(name: str, sample: dict) -> str:
+    if sample.get("provider"):
+        return sample["provider"]
+    n = name.lower()
+    if "flash" in n:
+        return "gemini-2.5-flash"
+    for tok, model in (("26b", "gemma4:26b"), ("31b", "gemma4:31b"), ("12b", "gemma4:12b")):
+        if tok in n:
+            return model
+    if "gemma" in n:
+        return "gemma4:26b"
+    return "ukendt"
+
+
+def _infer_set(name: str, sample: dict) -> str:
+    if sample.get("set_version"):
+        return "v" + str(sample["set_version"])
+    m = re.search(r"v(\d+(?:\.\d+)?)", name.lower())
+    return "v" + m.group(1) if m else "—"
+
+
+_DIMS = [("category", "category"), ("difficulty", "difficulty"), ("expected_behavior", "behavior")]
+
+
+def _scan_eval_file(path: Path) -> dict | None:
+    """Summarise one eval_results_*.jsonl: mean pass, repeat count, and a
+    pass-% breakdown per dimension. Returns None for empty/non-standard files."""
+    records: list[dict] = []
+    first: dict | None = None
+    try:
+        for line in path.read_text(encoding="utf-8").splitlines():
+            if not line.strip():
+                continue
+            r = json.loads(line)
+            if first is None:
+                first = r
+            if "item" in r and "scores" in r:
+                records.append(r)
+    except Exception:
+        return None
+    if not records or first is None:
+        return None
+
+    # Count DISTINCT run_idx values, not the max: eval_run --repeat N writes
+    # run_idx 1..N in one file (N repeats), but the resumable gemma driver wrote
+    # one run per file stamped run_idx=r, so max() would wrongly report N repeats.
+    runs = len({r.get("run_idx", 1) for r in records}) or 1
+    item_ids = {r["item"]["id"] for r in records}
+    passes = sum(1 for r in records if r["scores"].get("overall_pass"))
+    dims: dict[str, list[dict]] = {}
+    for field, label in _DIMS:
+        agg: dict[str, list[int]] = {}
+        for r in records:
+            v = r["item"].get(field) or "—"
+            a = agg.setdefault(v, [0, 0])
+            a[1] += 1
+            if r["scores"].get("overall_pass"):
+                a[0] += 1
+        dims[label] = [{"value": v, "pass": a[0], "total": a[1]} for v, a in sorted(agg.items())]
+
+    ts = first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
+    return {
+        "name": path.name,
+        "model": _infer_model(path.name, first),
+        "set_version": _infer_set(path.name, first),
+        "git_sha": first.get("git_sha") or "—",
+        "ts": ts,
+        "repeat": runs,
+        "n_items": len(item_ids),
+        "n_records": len(records),
+        "mean_pass": round(passes / runs, 1) if runs else 0,
+        "pass_pct": round(100 * passes / len(records)) if records else 0,
+        "dims": dims,
+    }
+
+
+@app.get("/api/eval/runs")
+def eval_runs():
+    base = Path(__file__).parent
+    out = []
+    for p in base.glob("eval_results_*.jsonl"):
+        if p.stat().st_size == 0:
+            continue
+        s = _scan_eval_file(p)
+        if s:
+            out.append(s)
+    out.sort(key=lambda r: r["ts"], reverse=True)
+    return JSONResponse(out)
+
+
+@app.get("/api/eval/runs/{name}")
+def eval_run_items(name: str):
+    """Per-item detail for one eval file: pass-frequency across repeats + the
+    last answer, for the drill-down."""
+    if "/" in name or ".." in name or not name.startswith("eval_results_"):
+        return JSONResponse({"error": "bad name"}, status_code=400)
+    path = Path(__file__).parent / name
+    if not path.is_file():
+        return JSONResponse({"error": "not found"}, status_code=404)
+    by_item: dict[str, dict] = {}
+    for line in path.read_text(encoding="utf-8").splitlines():
+        if not line.strip():
+            continue
+        try:
+            r = json.loads(line)
+        except Exception:
+            continue
+        if "item" not in r or "scores" not in r:
+            continue
+        it = r["item"]
+        e = by_item.setdefault(it["id"], {
+            "id": it["id"], "category": it.get("category"), "difficulty": it.get("difficulty"),
+            "expected_behavior": it.get("expected_behavior"), "question": it.get("question", ""),
+            "runs": 0, "passes": 0, "answer": "", "scores": {},
+        })
+        e["runs"] += 1
+        if r["scores"].get("overall_pass"):
+            e["passes"] += 1
+        e["answer"] = r.get("answer", "")
+        sc = r["scores"]
+        e["scores"] = {
+            "must_contain": sc.get("must_contain_pass"), "must_not_contain": sc.get("must_not_contain_pass"),
+            "behavior": sc.get("behavior_match"), "citation": sc.get("citation_pass"),
+            "detected_behavior": sc.get("detected_behavior"),
+        }
+    items = sorted(by_item.values(), key=lambda x: x["id"])
+    return JSONResponse({"name": name, "items": items})
+
+
+@app.get("/api/tools/health")
+def tools_health():
+    """Per-tool usage health from persisted live runs (mr_runs): call count,
+    empty-result rate, mean duration. Empty output was the tell for the dead
+    tools this project has hit before."""
+    agg: dict[str, dict] = {}
+    with _db_lock:
+        con = _db()
+        rows = con.execute("SELECT events FROM mr_runs ORDER BY ts DESC LIMIT 200").fetchall()
+        con.close()
+    for row in rows:
+        try:
+            events = json.loads(row["events"] or "[]")
+        except Exception:
+            continue
+        for ev in events:
+            if ev.get("type") != "tool_result":
+                continue
+            name = ev.get("tool_name", "?")
+            a = agg.setdefault(name, {"calls": 0, "empty": 0, "dur": 0.0, "dur_n": 0})
+            a["calls"] += 1
+            full = (ev.get("content_full") or "").strip()
+            if full in ("", "[]") or full.startswith("[]"):
+                a["empty"] += 1
+            d = ev.get("duration_s")
+            if isinstance(d, (int, float)):
+                a["dur"] += d
+                a["dur_n"] += 1
+    out = [{
+        "tool": name, "calls": a["calls"],
+        "empty_rate": round(100 * a["empty"] / a["calls"]) if a["calls"] else 0,
+        "mean_duration_s": round(a["dur"] / a["dur_n"], 2) if a["dur_n"] else None,
+    } for name, a in agg.items()]
+    out.sort(key=lambda r: r["calls"], reverse=True)
+    return JSONResponse({"tools": out, "n_runs": len(rows)})
+
+
 @app.post("/api/feedback")
 async def feedback(request: Request):
     body = await request.json()

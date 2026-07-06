@@ -19,7 +19,18 @@ truth, lit live) + **Tidslinjen** (scrub to replay) + `APP_MODE` user/dev.
   highlight the § in Graflinsen), **feedback** 👍/👎, and **history** (load and
   replay a past run — identical `(event_log, t)` path).
 
-The Eval tab is shelled as a placeholder for E3.
+**E3 added dev depth:**
+- **Eval lens** — the golden-set dashboard. A run selector (+ a compare column,
+  e.g. gemma vs flash) over `eval_results_*.jsonl`, stat tiles, a **pass-% per
+  dimension matrix** (category / behaviour / difficulty, worst cells flagged),
+  and an items drill-down (pass-frequency colour-coding, which checks failed,
+  last answer). Backed by `/api/eval/runs(+/{name})`.
+- **Tool-health table** — per-tool call count, **empty-result rate** (the
+  dead-tool detector this project has been bitten by), and mean duration, from
+  persisted live runs (`/api/tools/health`).
+
+This is the **primary UI**; the Streamlit `app.py` is legacy (its runtime
+functions remain the single source the backend imports).
 
 Everything is a pure function of `(event_log, t)`: the SSE stream fills the event
 log; one shared clock (`useRunClock`) drives every layer, so live play and
