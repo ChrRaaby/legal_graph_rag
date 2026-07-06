@@ -81,6 +81,11 @@ export default function Graflinse({ log, answer, t, live, selectedId, onSelect }
   return (
     <>
       <svg viewBox={`0 0 ${layout.width} ${layout.height}`} aria-label="Hentet delgraf" data-count={visibleSections}>
+        <defs>
+          <marker id="cite-arrow" viewBox="0 0 8 8" refX="6" refY="4" markerWidth="7" markerHeight="7" orient="auto">
+            <path d="M0.5,0.5 L6.5,4 L0.5,7.5" fill="none" stroke="var(--cites)" strokeWidth="1.6" />
+          </marker>
+        </defs>
         <g>
           {layout.edges.map((e, i) => {
             const cite = layout.nodes.find((n) => n.id === e.from)?.kind === "section" &&
@@ -90,7 +95,10 @@ export default function Graflinse({ log, answer, t, live, selectedId, onSelect }
                 key={i}
                 d={e.d}
                 className={`ge${cite ? " cites" : ""}${visible(e.revealMs) ? "" : " hide"}`}
-              />
+                markerEnd={cite ? "url(#cite-arrow)" : undefined}
+              >
+                {cite && e.via && <title>henviser via: «…{e.via}…»</title>}
+              </path>
             );
           })}
         </g>

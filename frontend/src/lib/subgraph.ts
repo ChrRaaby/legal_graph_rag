@@ -66,7 +66,16 @@ export interface GLayout {
 
 const W = 760;
 const H = 400;
-const MAX_PER_LAW = 8;
+const MAX_PER_LAW = 7;
+
+// The "cable tray": CITES edges never cross the node band. Each edge drops from
+// its source §, runs along its own lane in a horizontal channel below the band,
+// and rises into the target §. Crossings of nodes/labels are impossible by
+// construction; lanes are packed by interval-graph colouring.
+const CHANNEL_TOP = 342;
+const LANE_GAP = 9;
+const MAX_LANES = 5;
+const CORNER = 8; // rounded-corner radius of the drops/rises
 
 function revealByKey(sub: Subgraph, log: AgentEvent[]): Map<string, number> {
   const reveal = new Map<string, number>();
@@ -120,8 +129,8 @@ export function layoutGraflinse(sub: Subgraph, log: AgentEvent[]): GLayout {
       .filter((s) => s.law_id === law.id)
       .sort((a, b) => (Number(b.used) - Number(a.used)) || (Number(b.retrieved) - Number(a.retrieved)))
       .slice(0, MAX_PER_LAW);
-    const top = 116;
-    const bottom = H - 34;
+    const top = 112;
+    const bottom = CHANNEL_TOP - 22; // keep the band clear of the cable tray
     const gap = secs.length > 1 ? Math.min(64, (bottom - top) / (secs.length - 1)) : 0;
     secs.forEach((s, j) => {
       const y = secs.length > 1 ? top + j * gap : (top + bottom) / 2;
@@ -152,17 +161,44 @@ export function layoutGraflinse(sub: Subgraph, log: AgentEvent[]): GLayout {
       });
     }
   }
-  for (const c of sub.cites) {
-    const a = posById.get(c.from);
-    const b = posById.get(c.to);
-    if (!a || !b || a.id === b.id) continue;
-    const cx = (a.x + b.x) / 2;
-    const cy = Math.max(a.y, b.y) + 52;
-    const [ax, ay] = trim(a.x, a.y, cx, cy, a.r + 2);
-    const [bx, by] = trim(b.x, b.y, cx, cy, b.r + 2);
+  // CITES edges via the cable tray. Lane assignment = greedy interval colouring:
+  // an edge takes the first lane whose existing intervals don't overlap its
+  // horizontal span, so co-lane edges can never touch.
+  const lanes: Array<Array<[number, number]>> = [];
+  const cites = sub.cites
+    .map((c) => ({ c, a: posById.get(c.from), b: posById.get(c.to) }))
+    .filter((e): e is { c: (typeof sub.cites)[0]; a: GNode; b: GNode } => !!e.a && !!e.b && e.a.id !== e.b.id)
+    .sort((e1, e2) => Math.abs(e2.a.x - e2.b.x) - Math.abs(e1.a.x - e1.b.x)); // long spans first → inner lanes
+
+  for (const { c, a, b } of cites) {
+    // Same-column edges get a lateral offset so the drop and rise don't coincide.
+    const sameCol = Math.abs(a.x - b.x) < 1;
+    const sx = sameCol ? a.x - 5 : a.x;
+    const tx = sameCol ? b.x + 5 : b.x;
+    const lo = Math.min(sx, tx) - CORNER - 4;
+    const hi = Math.max(sx, tx) + CORNER + 4;
+
+    let lane = lanes.findIndex((iv) => iv.every(([l, h]) => hi < l || lo > h));
+    if (lane === -1) {
+      if (lanes.length < MAX_LANES) {
+        lane = lanes.length;
+        lanes.push([]);
+      } else {
+        lane = lanes.reduce((best, iv, i) => (iv.length < lanes[best].length ? i : best), 0);
+      }
+    }
+    lanes[lane].push([lo, hi]);
+    const laneY = CHANNEL_TOP + lane * LANE_GAP;
+
+    const dir = tx > sx ? 1 : -1;
+    const cr = Math.min(CORNER, Math.abs(tx - sx) / 2); // short spans: shrink corners so the middle never runs backwards
+    const d =
+      `M${sx},${a.y + a.r + 1} ` +
+      `L${sx},${laneY - cr} Q${sx},${laneY} ${sx + cr * dir},${laneY} ` +
+      `L${tx - cr * dir},${laneY} Q${tx},${laneY} ${tx},${laneY - cr} ` +
+      `L${tx},${b.y + b.r + 4}`;
     edges.push({
-      from: a.id, to: b.id, via: c.via,
-      d: `M${ax},${ay} Q${cx},${cy} ${bx},${by}`,
+      from: a.id, to: b.id, via: c.via, d,
       revealMs: Math.max(a.revealMs, b.revealMs),
     });
   }
