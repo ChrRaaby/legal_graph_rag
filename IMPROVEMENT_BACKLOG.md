@@ -76,6 +76,15 @@ cd legal-legislation-explorer
 
 ## Phase A — Deterministic fixes (no eval runs; do these first)
 
+> **⚠ LARGELY SUPERSEDED BY PHASE E (2026-07-06).** These tasks targeted the old
+> Streamlit UI, now retired doc-level. A1 (shared scorer) → the Streamlit eval
+> panel is dead; the Eval lens reads eval_results directly. A3 (law-aware
+> citations) → done natively in server.py `resolve_citations`. A4 (architecture
+> labels) → Kredsløbet is generated from runtime truth. **Still valid: A2**
+> (delete dead `_attach_kilde` — trivial) and A1's underlying idea only if the
+> stale scorer copy in app.py confuses future readers (it's unused by the new UI).
+> Do NOT implement these against the legacy Streamlit views.
+
 ### A1. Fix the in-app Evaluation panel scorer (it crashes on the current golden set) ☐
 - **Bug (verified):** `app.py` carries a stale copy of the scorer (`_eval_normalize`/`_eval_detect_behavior`/`_eval_score_item`, app.py:1650–1716, comment "ported from eval_run.py"). 12/30 golden-set items now use **any-of lists** in `must_contain` (e.g. gs-002 `[["48.300","67.500"]]`); the stale copy calls `.lower()` on a list → `AttributeError`. It also lacks numeric word-boundaries and uses a wrong behavior-priority order.
 - **Fix:** single-source the scoring. Because eval_run imports app (not vice versa), **move the current implementations from eval_run.py into app.py** — `_normalize`, `_term_label`, `_term_present`, `detect_behavior` (+ `BEHAVIOR_PRIORITY`, `SUBSTANTIVE_BEHAVIORS`), `behavior_matches`, `score_item` — replacing app.py's stale `_eval_*` copies, and have eval_run.py import them from app. Delete the duplicates in eval_run.py.
@@ -96,6 +105,13 @@ cd legal-legislation-explorer
 ---
 
 ## Phase B — UI: separate primary use case (tax Q&A) from secondary (debug/eval)
+
+> **✅ FULLY SUPERSEDED BY PHASE E (2026-07-06).** Every B-task exists natively in
+> Maskinrummet: B1 = `APP_MODE` in server.py; B2 = the tab rail; B3 = kilder chips
+> (law-aware verify + ELI links + graph-highlight); B4 = live Kredsløb/caption/
+> thinking indicator; B5 = (only gap — empty-state example chips, small frontend
+> nicety if wanted); B6 = 👍/👎 → mr_feedback; B7 = disclaimer. Do not build any
+> of this in Streamlit.
 
 User's explicit design goal. Primary = a clean Danish tax-question assistant; secondary = the developer's window into the solution. All UI-only — no eval runs; verify by running the app (`.venv/bin/streamlit run app.py`) and eyeballing both modes.
 
@@ -133,7 +149,13 @@ User's explicit design goal. Primary = a clean Danish tax-question assistant; se
 
 Ranked by expected value. For each: implement → smoke (`--item-ids`) → full protocol (§2) → keep-or-revert by the decision rule.
 
-### C1. Rewrite `Citation_Network_Explorer` to use the real Section-level CITES edges ☐
+### C1. Rewrite `Citation_Network_Explorer` to use the real Section-level CITES edges ☑ DONE 2026-07-06 (Opus impl, Fable verdict: KEEP)
+- **Outcome:** tool rewritten to `(lov, paragraf)` → `{citerer[], citeret_af[]}` over the 1694 Section-level CITES edges (alias+genitive law resolution incl. merværdiafgiftslov→momslov; current-version filter; 15-row caps; informative not-found response). Cypher-verified: LL § 16 A = 13 out/15 in cross-law with `via` phrases; ABL § 12 ← PSL § 4 a (the gs-025 bridge).
+- **Measurement:** smoke (gs-024/025) + full 50-item flash run (`eval_results_c1_flash.jsonl`, stamped cfb8bec): **the model called the tool 0 times in 50 items** → change is inert-by-construction on flash (37/50 vs 36/50 = noise). The 5× protocol was deliberately skipped: with zero invocations the system under eval is identical to baseline, so further runs measure noise at API cost. **KEEP: a correct on-demand tool strictly dominates a dead one** (zero cost uncalled; feeds Graflinsen; ready for any model that reaches for it). Gemma cell unmeasured (needs GPU) — see C1b.
+
+### C1b. Get the model to actually CALL the citation tool ☐ (FABLE-LANE — prompt judgment)
+- The recurring lesson (rate tools, now this): fixing a tool ≠ the model using it. Flash never invoked Citation_Network_Explorer even on the chain items it was built for (gs-024/025/043/044/046/050 — the weakest eval dimension, cross_reference 25–40%).
+- Candidate levers, each needs the full measurement protocol: (i) one tool-guidance line in the CITATIONSKÆDER prompt block ("brug Citation_Network_Explorer til at finde beskatningshjemlen") — prompt change, churn risk, measure with judge; (ii) test on gemma-26B (different tool-selection; GPU needed); (iii) fold citation-following into a deterministic post-answer step instead (cf. the parked post-generation enrichment idea in memory todo_flash35_and_retrieval).
 - **Why:** the graph has **1,694 `(:Section)-[:CITES]->(:Section)` edges** (built by `build_cites_edges.py`, each with a `via` source phrase) but the tool (app.py:907–932) queries `(:Legislation)-[:CITES]->(:Legislation)` — **zero edges, dead tool**. The model calls a citation tool and concludes "no citations." Fixing this is the planned *on-demand* exposure of the citation data (ground rule 1: tools yes, retrieval injection no).
 - **New shape:** input `lov` (name/abbrev, resolved via the ALIASES map + title containment) + `paragraf` (e.g. "16 A"); output two lists: *citerer* (outgoing `(:Section)-[:CITES]->`) and *citeret af* (incoming), each row `{lov, paragraf, via}` — resolve each Section back to its Legislation via the hierarchy for the law name. Cap ~15 rows each. Keep the tool name; rewrite the description to say exactly what it does ("Find hvilke §§ en bestemt § henviser til, og hvilke §§ der henviser til den — på tværs af love").
 - **Verify first in Cypher** (read-only, e.g. via `Read_Only_Cypher`-style query in a script): LL § 16 A should show incoming/outgoing cross-law edges. Then eval: watch gs-024/gs-025 (multi-law chains) in the judge re-score.
@@ -151,6 +173,12 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 ### C4. Cross-encoder reranker over vector hits ☐  (the parked "narrowing" idea #1)
 - Retrieve broad (the code already fetches `k*4` candidates, app.py:821), score each `(question, matched_text)` pair with a cross-encoder — `BAAI/bge-reranker-v2-m3` via `sentence_transformers.CrossEncoder` (multilingual, runs on the 4090; CPU works but slower — **ask the user about GPU**) — and keep only the top 3–4 rows for the tool output. CITES/`is_current` may be used as *ranking boosts*, never as output text. Cache the model like the embedder (bake-in consideration also noted in the GCP todo).
 - **Hypothesis:** leaner, more relevant context → judge up AND determinism up. This is the highest-upside experiment in the backlog. Measure with the full protocol; also compare answer lengths/latency.
+
+### C6. Validate the `Skattesats_Opslag` tool ☐  (user-flagged 2026-07-06)
+- **Why:** in manual testing the user observed it "did not seem to provide much relevant context." Corroborated by an earlier C1 probe run where `Skattesats_Opslag("selskabsskat")` returned dividend-withholding snippets from KSL/ABL/AL — NOT the corporate-rate provision (SEL § 17) — because it lexically matches any % near the topic tokens (see app.py `skattesats_opslag_structured`).
+- **Investigate:** how often the agent calls it, and whether its output is on-topic vs noise (mine `observability.db` mr_runs + tool-health empty/■ rates + eval tool_sequence). It targets §§ that STATE a percentage but ranks by loose token overlap, so it surfaces the wrong %-bearing provisions.
+- **Options (measure each vs baseline, judge re-score):** (a) tighten the lexical match (require the rate to be in a section whose law/§ matches the topic, not just any % near a token); (b) fold rate-lookup into `Contextual_Text_Retriever` and remove the tool (fewer tools — cf. C3); (c) keep only for the specific reform-rate cases it was built for and sharpen the description so the model calls it less often. Decide by the tool-health data + a judge-measured A/B.
+- Relates to [[C3]] (tool pruning) — could be handled together.
 
 ### C5. Judge-measured prompt pruning ☐  (only after D1)
 - The system prompt (app.py:1373–1450) contains substring-scorer fitting: exact-phrase mandates like "brug præcist 'er ikke ændret' (IKKE 'er ikke blevet ændret')", "brug ordene 'ingen beløbsgrænse' og 'afgiftsfri'", the § 9 Z answer template "(Denne formulering indeholder de nødvendige signaler)". These optimize the OLD scorer, not answers.
