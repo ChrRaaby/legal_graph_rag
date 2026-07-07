@@ -164,6 +164,11 @@ GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", GEMINI_MODEL).spl
 AGENT_RETRIEVAL_K = int(os.getenv("AGENT_RETRIEVAL_K", 10))
 AGENT_HISTORY_MESSAGES = int(os.getenv("AGENT_HISTORY_MESSAGES", 20))
 DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
+# C2: constrain the direct-§ lookup in retrieve_text_with_context to the law named
+# in the query and to the in-force version (pure narrowing — removes wrong-law /
+# historic-version rows). Escape hatch for the matched-pair A/B protocol:
+# C2_DIRECT_NARROW=off reproduces the pre-C2 all-laws/all-versions behavior exactly.
+C2_DIRECT_NARROW = os.getenv("C2_DIRECT_NARROW", "on").strip().lower() not in ("0", "off", "false", "no")
 
 NETWORK_GRAPH_HEIGHT = 620
 
@@ -829,8 +834,22 @@ Question: {question}""",
         if _sec_match:
             _sec_num = _sec_match.group(1).strip()
             _stk_num = _sec_match.group(2)
+            # C2: resolve the law named in the query so the direct lookup is
+            # constrained to it (else "§ 16" matches all laws — PSL/momsloven/
+            # even markfrø — and every historic version). Take the law-word
+            # nearest-and-preceding the § (per-§ attribution in multi-law
+            # queries); fall back to the first law named if none precedes
+            # (handles "§ 16 i ligningsloven").
+            _law_stem = None
+            _laws = list(re.finditer(r"([a-zæøå]{4,}lov)(?:en|ens|s)?\b", q.lower()))
+            if _laws:
+                _before = [m for m in _laws if m.start() < _sec_match.start()]
+                _law_stem = _citation_law_stem((_before[-1] if _before else _laws[0]).group(1))
             _direct_q = """
             MATCH (sec:Section {number: $sec})<-[:HAS_SECTION]-(ch)<-[:HAS_CHAPTER|HAS_PART*0..3]-(leg:Legislation)
+            WHERE (NOT $narrow)
+               OR (($law_stem IS NULL OR toLower(leg.title) CONTAINS $law_stem)
+                   AND coalesce(leg.is_current, true))
             OPTIONAL MATCH (sec)-[:HAS_PARAGRAPH]->(par:Paragraph)
             WHERE $stk IS NULL OR par.number = $stk
             WITH leg, sec, par
@@ -847,7 +866,11 @@ Question: {question}""",
             ORDER BY par.number
             LIMIT 5
             """
-            _direct_rows = analysis.run_query(_direct_q, {"sec": _sec_num, "stk": _stk_num})
+            _direct_rows = analysis.run_query(
+                _direct_q,
+                {"sec": _sec_num, "stk": _stk_num,
+                 "narrow": C2_DIRECT_NARROW, "law_stem": _law_stem},
+            )
 
         # Fetch 4× candidates: Commentary nodes dominate the top hits for any query
         # mentioning § numbers (they score high because they explicitly cite § refs).
