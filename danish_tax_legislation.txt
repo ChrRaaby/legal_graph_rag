@@ -43,3 +43,6 @@
 
 # Aktiesparekontoloven (ASKL)
 2025/281
+
+# Boafgiftsloven (BAL) — D1, added 2026-07-09; current LBK per skm.dk satser page
+2023/11
