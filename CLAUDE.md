@@ -71,15 +71,14 @@ Embedding model: `intfloat/multilingual-e5-large` (1024 dims). Uses `passage: ` 
 - **Embeddings** — `intfloat/multilingual-e5-large` via HuggingFace (1024 dims).
 - **`GraphCypherQAChain`** — NL-to-Cypher fallback using a detailed prompt with 14 rules.
 - **`Neo4jVector`** — reads from `text_embeddings_index` on `Text` nodes.
-- **Agent tools** — 13 LangChain `StructuredTool`s wrapping Cypher queries and hybrid search:
+- **Agent tools** — 12 LangChain `StructuredTool`s wrapping Cypher queries and hybrid search (C3 pruned `Semantic_Search`, `Citation_Counts`, `Text2Cypher_Expert` — 0 useful calls in 2,301 saved item-runs; definitions remain in app.py behind `C3_TOOL_PRUNE=off`):
   - `Legislation_Title_Resolver` — lexical title matching with ranked scoring.
   - `Legislation_Finder` — hybrid (lexical + vector) legislation discovery.
-  - `Contextual_Text_Retriever` — vector search returning full Legislation → Paragraph hierarchy context.
-  - `Citation_Network_Explorer`, `Supersedes_Network_Explorer`, `Superseded_By_Network_Explorer` — relationship traversal.
+  - `Contextual_Text_Retriever` — vector search returning full Legislation → Paragraph hierarchy context (C2 law-narrowed direct-§ lookup; C7b byte-identical row dedup).
+  - `Citation_Network_Explorer` (C1: Section-level CITES), `Supersedes_Network_Explorer`, `Superseded_By_Network_Explorer` — relationship traversal.
   - `Graph_Schema_Navigator` — returns live schema via `apoc.meta.data()`.
   - `Read_Only_Cypher` — executes analyst-provided Cypher (blocks write operations).
-  - `Text2Cypher_Expert` — last-resort NL-to-Cypher via `GraphCypherQAChain`.
-  - `Legislation_By_URI`, `Hierarchy_Path_Resolver`, `Citation_Counts`, `Semantic_Search`.
+  - `Legislation_By_URI`, `Hierarchy_Path_Resolver`, `Skattesats_Opslag`, `Regulering_Table_Lookup`, `Section_Exists`.
 
 `stream_agent_answer()` streams the LangGraph agent, collects tool trace events, and returns `(answer, tool_events)` — this 2-tuple must be preserved as `eval_run.py` unpacks it.
 
