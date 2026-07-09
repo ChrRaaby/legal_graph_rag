@@ -174,6 +174,13 @@ C2_DIRECT_NARROW = os.getenv("C2_DIRECT_NARROW", "on").strip().lower() not in ("
 # CITATIONSKÆDER are kept verbatim). Escape hatch for the matched-pair protocol:
 # C5_PROMPT_LEAN=off reproduces the pre-C5 prompt byte-for-byte.
 C5_PROMPT_LEAN = os.getenv("C5_PROMPT_LEAN", "on").strip().lower() not in ("0", "off", "false", "no")
+# C7: drop byte-identical duplicate rows from retrieval output. Multi-version
+# laws carry unchanged §-texts as separate embedded Text nodes (2,755 surplus
+# duplicates measured across 1,614 groups), so 2-3 pool slots per query are
+# wasted on twins. Pure narrowing: identical text = zero information lost;
+# temporal questions are unaffected (their historic texts differ by definition).
+# C7_ROW_DEDUP=off reproduces the pre-C7 rows exactly.
+C7_ROW_DEDUP = os.getenv("C7_ROW_DEDUP", "on").strip().lower() not in ("0", "off", "false", "no")
 
 NETWORK_GRAPH_HEIGHT = 620
 
@@ -1028,7 +1035,24 @@ Question: {question}""",
         ORDER BY vector_score DESC
         LIMIT $limit
         """
+        # C7b: drop byte-identical duplicate rows (multi-version laws embed
+        # unchanged §-texts as separate Text nodes) WITHOUT over-fetching — the
+        # result is strictly fewer rows, same distinct content: a true narrowing
+        # that shortens the context. (C7's over-fetch+backfill variant measured
+        # judge −6: the backfilled rows were context ADDITION — see backlog C7.)
+        # Keep the first (= highest-scored) row of each text; ORDER BY makes
+        # this deterministic.
         rows = analysis.run_query(query, {"hits": hits, "limit": limit})
+        if C7_ROW_DEDUP:
+            _seen_txt: set = set()
+            _unique = []
+            for r in rows:
+                key = re.sub(r"\s+", " ", str(r.get("matched_text") or "")).strip()
+                if key in _seen_txt:
+                    continue
+                _seen_txt.add(key)
+                _unique.append(r)
+            rows = _unique
 
         # Prepend direct § lookup rows (dedup by section+paragraph number so
         # they don't duplicate vector hits that happened to surface the same node).
