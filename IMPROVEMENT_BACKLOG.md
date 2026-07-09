@@ -55,6 +55,10 @@ This plan is written so a mid-tier model can execute it safely: the ground rules
 - gemma-26B is non-deterministic even at temperature=0, seed=0 — single-run deltas of ±2–3 items are noise. Only trust `--repeat 5` means and judge re-scores.
 - **⚠ 2026-07-08: stored baseline numbers are SUBSTRATE-BOUND and go stale** (Ollama decode drift ≈ −4.8 det in one week on identical configs; judge drift 33→20 on identical answers). Do NOT compare a new run against this table — run **same-night ON-vs-OFF matched cells** (env escape hatches) and judge both cells in one pass. Details in the C4 entry.
 
+## 1.5 Season confirmatory (2026-07-09): ALL FOUR KEEPS VALIDATED ON GEMMA
+
+Combined same-night gemma4:26b matched pair for **C5+C7b+C3** (single pair, three hatches toggled together; C2 had its own gemma pair earlier): **judge ON 28 vs OFF 26 on a 47-answer footprint = +2 (8↑ 6↓), det 31 vs 30, 0 judge errors** — flat-or-better, no regression signal. Footprint 47/50 (the C5 prompt component perturbs every trajectory, unlike C2's 8/50). Cells `eval_results_conf_gemma_{on,off}.jsonl`; benign sha skew between cells (mid-batch seed-file/backlog commits — zero agent-code or graph changes). **C1 (inert-by-construction), C2, C5, C7b, C3 are all now validated on both substrates.**
+
 ## 2. Measurement protocol (for every Phase-C task)
 
 ```bash
