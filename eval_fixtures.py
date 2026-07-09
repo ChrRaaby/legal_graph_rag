@@ -34,9 +34,10 @@ _ABBREV_STEM = {
     "al": "afskrivningslov", "fbl": "fondsbeskatningslov",
     "askl": "aktiesparekontolov", "bal": "boafgiftslov",
 }
-# Laws expected by the golden set but not loaded in the graph (D1/D2 pending).
+# Laws expected by the golden set but not loaded in the graph (D2 pending).
 # Their §-recall is definitionally unreachable — reported separately, not failed.
-_NOT_IN_GRAPH = {"bal"}
+# (BAL removed 2026-07-09 — loaded by D1.)
+_NOT_IN_GRAPH: set = set()
 
 _PCT_RE = re.compile(r"\b(\d+(?:,\d+)?)\s*(?:pct\.?|%)", re.IGNORECASE)
 

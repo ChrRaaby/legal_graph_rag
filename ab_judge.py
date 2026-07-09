@@ -9,7 +9,7 @@ costs zero new judge calls for those items.
 
 Usage:
   .venv/bin/python3 ab_judge.py --prefix c5_flash                 # pro judge (gate)
-  JUDGE_MODEL=gemini-2.5-flash .venv/bin/python3 ab_judge.py --prefix c5_sent
+  JUDGE_MODEL=gemini-3.5-flash .venv/bin/python3 ab_judge.py --prefix c5_sent
       # cheap direction-read during iteration; use pro for the merge gate
 """
 import argparse
@@ -35,7 +35,7 @@ def main() -> int:
     ap.add_argument("--prefix", required=True, help="reads eval_results_<prefix>_{on,off}.jsonl")
     ap.add_argument("--workers", type=int, default=3)
     args = ap.parse_args()
-    judge_model = os.getenv("JUDGE_MODEL", "gemini-2.5-pro")
+    judge_model = os.getenv("JUDGE_MODEL", "gemini-3.1-pro-preview")
     os.environ["JUDGE_MODEL"] = judge_model
 
     sys.path.insert(0, str(REPO))

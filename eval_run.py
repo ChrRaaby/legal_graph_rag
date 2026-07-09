@@ -571,9 +571,9 @@ def check_connectivity() -> bool:
             elif google_key:
                 from langchain_google_genai import ChatGoogleGenerativeAI
                 llm = ChatGoogleGenerativeAI(
-                    model="gemini-2.5-flash", temperature=0, api_key=google_key
+                    model="gemini-3.5-flash", temperature=0, api_key=google_key
                 )
-                label = "gemini-2.5-flash"
+                label = "gemini-3.5-flash"
             else:
                 from langchain_openai import ChatOpenAI
                 llm = ChatOpenAI(model="gpt-4o-mini", temperature=0, api_key=openai_key)
@@ -611,7 +611,7 @@ def build_judge_llm():
 
     A good judge is ideally a capable model, independent of (and at least as
     strong as) the agent being graded. Override with JUDGE_MODEL — a Gemini
-    model id (e.g. gemini-2.5-pro for more rigour, gemini-2.5-flash by default).
+    model id (e.g. gemini-3.1-pro-preview for more rigour, gemini-3.5-flash by default).
     Falls back to the agent-LLM priority if no Google key is configured.
     """
     from dotenv import load_dotenv
@@ -622,7 +622,7 @@ def build_judge_llm():
     ollama_base_url = os.getenv("OLLAMA_BASE_URL", "http://172.21.64.1:11434")
     if google_key:
         from langchain_google_genai import ChatGoogleGenerativeAI
-        judge_model = os.getenv("JUDGE_MODEL", "gemini-2.5-flash")
+        judge_model = os.getenv("JUDGE_MODEL", "gemini-3.5-flash")
         return ChatGoogleGenerativeAI(model=judge_model, temperature=0, api_key=google_key)
     elif ollama_model:
         from langchain_ollama import ChatOllama

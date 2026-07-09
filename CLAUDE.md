@@ -12,7 +12,7 @@ A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.
 
 **Primary UI = the Maskinrummet frontend** (`server.py` FastAPI + `frontend/` React; run `uvicorn server:app` then `npm --prefix frontend run dev`). `app.py` remains the **single source of the agent runtime** (`build_runtime`, `stream_agent_answer`, tools, guards) — server.py and eval_run.py import it under a Streamlit stub. Its Streamlit UI (sidebar views, chat, eval panel) is **legacy/deprecated** as of E3 (superseded by Maskinrummet) but NOT removed: the runtime functions live in the same file and the module-level Streamlit code is load-bearing for the stub-import. Removing the Streamlit UI is a deferred, careful refactor (see backlog Phase E). Do not treat the Streamlit app as the deliverable.
 
-Laws in the graph: Personskatteloven (PSL), Ligningsloven (LL, 4 versions incl. 2025/1500), Selskabsskatteloven (SEL), Kildeskatteloven (KSL, 2 versions), Momsloven (ML), Aktieavancebeskatningsloven (ABL), Kursgevinstloven (KGL), Afskrivningsloven (AL), Fondsbeskatningsloven (FBL), Aktiesparekontoloven (ASKL), LOV 482/2024, PSL § 20 reguleringstabel 2025–2026.
+Laws in the graph: Personskatteloven (PSL, 2 versions), Ligningsloven (LL, 4 versions incl. 2025/1500), Selskabsskatteloven (SEL, 2 versions), Kildeskatteloven (KSL, 2 versions), Momsloven (ML), Aktieavancebeskatningsloven (ABL), Kursgevinstloven (KGL), Afskrivningsloven (AL), Fondsbeskatningsloven (FBL), Aktiesparekontoloven (ASKL), Boafgiftsloven (BAL, 2023/11 — D1), LOV 482/2024, PSL § 20 reguleringstabel 2025–2026.
 
 ## Environment Setup
 
@@ -39,7 +39,7 @@ DEBUG_TOOL_CALLS=1         # optional, enables tool call debug logging
 
 1. **`danish_crawler.ipynb`** — Crawls retsinformation.dk from seed URLs in `danish_tax_legislation.txt`, parses XML, and outputs JSON.
 2. **`loader.ipynb`** — Loads parsed JSON into Neo4j using PySpark. Builds the graph nodes and relationships.
-3. Vectorization — run `/tmp/vectorize_danish.py` (uses `intfloat/multilingual-e5-large`, 1024 dims, CUDA; uses `passage: ` prefix per multilingual-e5 convention; auto-detects unembedded nodes).
+3. Vectorization — run `vectorize_danish.py` (in-repo; `intfloat/multilingual-e5-large`, 1024 dims, CUDA, `passage: ` prefix, L2-normalized; labels new structural nodes `:Text` — a secondary label the loader does NOT apply — then embeds whatever lacks `text_embedding`). **GPU — ask user.** Note: load new acts via a single-file staging dir (whole-corpus Spark reads break on cross-file schema drift; see backlog D1).
 4. **`indices.ipynb`** — Creates Neo4j vector and text indexes (including `text_embeddings_index` used by the app).
 
 Seed file: `danish_tax_legislation.txt` — lists all loaded laws as ELI year/number pairs (e.g. `2021/1284` → `https://www.retsinformation.dk/eli/lta/2021/1284/xml`).

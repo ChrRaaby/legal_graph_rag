@@ -28,6 +28,19 @@ def main() -> int:
     a = Neo4jAnalysis(os.getenv("NEO4J_URI"), os.getenv("NEO4J_USER"),
                       os.getenv("NEO4J_PASSWORD"), os.getenv("NEO4J_DATABASE", "neo4j"))
 
+    # Labeling pass: newly loaded structural nodes (Paragraph/Section/Chapter)
+    # carrying text get the :Text label the vector index reads. Commentary is
+    # deliberately EXCLUDED: 2,099 pre-existing commentaries are unlabeled by
+    # the original pipeline's choice, and labeling+embedding them would change
+    # the vector-pool composition — an unmeasured, agent-visible retrieval
+    # change (backlog ground rule 6).
+    labeled = a.run_query(
+        "MATCH (n) WHERE (n:Paragraph OR n:Section OR n:Chapter) "
+        "AND n.text IS NOT NULL AND size(n.text) > 0 AND NOT n:Text "
+        "SET n:Text RETURN count(n) AS n"
+    )[0]["n"]
+    print(f"labeled {labeled} new structural node(s) as :Text")
+
     todo = a.run_query(
         "MATCH (t:Text) WHERE t.text_embedding IS NULL AND t.text IS NOT NULL "
         "RETURN elementId(t) AS id, t.text AS text"
