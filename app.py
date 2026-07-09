@@ -181,6 +181,15 @@ C5_PROMPT_LEAN = os.getenv("C5_PROMPT_LEAN", "on").strip().lower() not in ("0", 
 # temporal questions are unaffected (their historic texts differ by definition).
 # C7_ROW_DEDUP=off reproduces the pre-C7 rows exactly.
 C7_ROW_DEDUP = os.getenv("C7_ROW_DEDUP", "on").strip().lower() not in ("0", "off", "false", "no")
+# C3: prune three tools from the agent's decision surface. Across 2,301 saved
+# eval item-runs: Citation_Counts was called 0× (queries LINKED_TO — the
+# relationship type does not exist in the DB), Text2Cypher_Expert was called 0×,
+# Semantic_Search 13× with 23% pass-when-called (vs 51% baseline) — it is a
+# strictly-worse duplicate of Contextual_Text_Retriever (no Commentary filter,
+# no hierarchy context). C3_TOOL_PRUNE=off keeps all 15 tools + their prompt
+# mentions (pre-C3 behavior, byte-identical).
+C3_TOOL_PRUNE = os.getenv("C3_TOOL_PRUNE", "on").strip().lower() not in ("0", "off", "false", "no")
+_C3_PRUNED_TOOLS = {"Semantic_Search", "Citation_Counts", "Text2Cypher_Expert"}
 
 NETWORK_GRAPH_HEIGHT = 620
 
@@ -298,11 +307,11 @@ Spørger brugeren om en specifik § (f.eks. "§ 9 Z" eller "§ 12 a"), skal du A
 - Brug ALDRIG clarify-formuleringer ("Kan du oplyse", "Hvad mener du") i admit_unknown-svar — det forvirrer klassifikationen.
 
 VÆRKTØJSANVISNINGER:
-Brug det mest specifikke værktøj først. Foretræk Legislation_Finder (hybrid titel+vektor) og vektorbaserede værktøjer (Contextual_Text_Retriever, Semantic_Search) til indholdsspørgsmål.
+Brug det mest specifikke værktøj først. Foretræk Legislation_Finder (hybrid titel+vektor) og vektorbaserede værktøjer {c3_vektor} til indholdsspørgsmål.
 For eksplicit titel-opslag (f.eks. 'Personskatteloven'), kald Legislation_Title_Resolver først.
 Bevar altid den juridiske kontekst (Lovgivning > Del > Kapitel > Afsnit > Paragraf) i svaret.
 Hvis et værktøj returnerer tomme resultater, så gentag ikke præcis det samme kald. Inkludér links til relevante love, afsnit og paragraffer i svaret.
-Brug Legislation_By_URI til eksakt lovopslag, Hierarchy_Path_Resolver til kontekstrekonstruktion og Citation_Counts til hurtige citationsmetrikker.
+{c3_uri_line}
 Contextual_Text_Retriever: brug beskrivende emnesætninger om INDHOLDET (f.eks. "fri bil skattepligtig værdi arbejdsgiver procent"), IKKE paragrafhenvisninger (f.eks. "LL § 16 stk. 4"). Paragrafhenvisninger i søgestrengen forringer søgekvaliteten markant.
 For spørgsmål om skattepligt af personalegoder, naturalier eller gaver fra arbejdsgiver: Undersøg ALTID LL § 16 stk. 3 (den generelle bagatelgrænse) som primær hjemmel, inden du fokuserer på særregler (§ 7 U jubilæumsgaver, § 7 M reklamegaver osv.). Citér den generelle regel som grundlag og nævn særreglerne som undtagelser.
 For spørgsmål om privatbil brugt erhvervsmæssigt: hjemlen er LL § 9 B (erhvervsmæssig kørsel og godtgørelse), ikke § 9 C (befordringsfradrag mellem hjem og arbejde). Citér "kun den erhvervsmæssige" del og anfør "ikke alle udgifter" kan fratrækkes.
@@ -318,8 +327,8 @@ Når du har fundet den primære § — foretag altid endnu et opslag for at find
 Svar på dansk når spørgsmålet stilles på dansk. Fokusér på det præcise spørgsmål og gør ikke mere end bedt."""
 
 
-def _build_system_prompt(lean: bool) -> str:
-    """Assemble the agent system prompt (C5).
+def _build_system_prompt(lean: bool, prune: bool = True) -> str:
+    """Assemble the agent system prompt (C5 + C3).
 
     lean=False reproduces the pre-C5 prompt byte-for-byte (the matched-pair
     OFF cell). lean=True removes ONLY the substring-scorer-fitted phrasing
@@ -327,8 +336,18 @@ def _build_system_prompt(lean: bool) -> str:
     parenthetical) — every structural fact, §-pointer, behavior section and
     citationskæde is kept verbatim. Deletions only, no rewording of survivors:
     rewording is a second treatment and the historically risky change class.
+
+    prune=False keeps the pruned tools' prompt mentions (pre-C3, byte-identical
+    together with C3_TOOL_PRUNE=off's full tool set); prune=True drops the
+    mentions of Semantic_Search and Citation_Counts alongside the tools.
     """
     seg = {
+        # C3: tool mentions follow the tool set (a prompt must not reference
+        # tools the agent does not have).
+        "c3_vektor": "(Contextual_Text_Retriever)" if prune
+        else "(Contextual_Text_Retriever, Semantic_Search)",
+        "c3_uri_line": "Brug Legislation_By_URI til eksakt lovopslag og Hierarchy_Path_Resolver til kontekstrekonstruktion." if prune
+        else "Brug Legislation_By_URI til eksakt lovopslag, Hierarchy_Path_Resolver til kontekstrekonstruktion og Citation_Counts til hurtige citationsmetrikker.",
         # FORMUESKAT: the fact ("afskaffet i 1997") stays in the preceding
         # sentence; only the exact-phrase mandate is cut.
         "c5_formueskat": "" if lean else ' Anfør eksplicit "afskaffet i 1997" når nogen spørger om formueskat.',
@@ -1596,7 +1615,12 @@ Question: {question}""",
         if getattr(_t, "func", None) is not None:
             _t.func = _retry_on_connection(_t.func)
 
-    system_prompt = _build_system_prompt(C5_PROMPT_LEAN)
+    # C3: shrink the decision surface — the pruned tools' definitions above are
+    # untouched so C3_TOOL_PRUNE=off restores the full 15-tool set exactly.
+    if C3_TOOL_PRUNE:
+        tools = [t for t in tools if t.name not in _C3_PRUNED_TOOLS]
+
+    system_prompt = _build_system_prompt(C5_PROMPT_LEAN, C3_TOOL_PRUNE)
 
     agent_executor = create_agent(llm, tools, system_prompt=system_prompt)
     return analysis, agent_executor, tools
