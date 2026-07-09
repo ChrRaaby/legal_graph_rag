@@ -233,6 +233,7 @@ Ranked by expected value. For each: implement → smoke (`--item-ids`) → full 
 
 ### D2. Data-driven law expansion ☐
 - `build_cites_edges.py` (dry run, no `--commit`) prints `skip_outof_graph` — a frequency-ranked list of laws referenced by the loaded corpus but missing from it (~35 laws: pensionsbeskatningsloven, virksomhedsskatteloven, …). Present the top 5 to the user with counts and let them pick what to load next (each load = crawl+load+vectorize cycle as in D1). This is the evidence-based way to grow graph content.
+- **Pre-picked candidate (user deferral 2026-07-09 from D1): lov nr. 369 af 09/04/2025** — the bo-/gaveafgift reform (nedsættelse ved erhvervsoverdragelse, skematisk værdiansættelse, succession/pengetank). NOT consolidated into BAL LBK 2023/11; load as a separate act like LOV 482/2024. Affects generationsskifte questions, not gs-019's spouse exemption. ELI: retsinformation eli for the act (find via eli/lta/2025 — verify with the stub-check like D1).
 
 ### D3. Golden-set expansion to ~50 items ☑ DONE 2026-07-05  (v4.0: +20 items gs-031..gs-050, graph-verified, expert-reviewed; re-baseline run started — v3.x scores NOT comparable)
 - Current 30 items are thin exactly where behavior matters: 1 clarify, 1 refuse, 2 admit_unknown, 1 safety-pillar. Single-item classes make behavior regressions invisible/noisy.
