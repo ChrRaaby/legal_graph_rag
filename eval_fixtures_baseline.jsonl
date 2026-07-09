@@ -1,0 +1,38 @@
+{"id": "gs-001", "sec_checks": [{"lov": "LL", "paragraf": "9 C", "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-002", "sec_checks": [{"lov": "PSL", "paragraf": "8 a", "found": true}], "rate_check": {"expected_pcts": ["27", "42"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-003", "sec_checks": [{"lov": "LL", "paragraf": "16", "found": false}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-004", "sec_checks": [{"lov": "LL", "paragraf": "16", "found": true}], "rate_check": {"expected_pcts": ["22,5"], "missing": []}, "n_rows": 13, "git_sha": "56f2719", "env": {}}
+{"id": "gs-005", "sec_checks": [{"lov": "SEL", "paragraf": "17", "found": true}], "rate_check": {"expected_pcts": ["22"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-006", "sec_checks": [{"lov": "MOMSL", "paragraf": "33", "found": false}], "rate_check": {"expected_pcts": ["0", "25"], "missing": ["25"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-007", "sec_checks": [{"lov": "ABL", "paragraf": "13 A", "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-008", "sec_checks": [{"lov": "AL", "paragraf": "5", "found": false}], "rate_check": {"expected_pcts": ["12", "25", "7"], "missing": ["12"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-009", "sec_checks": [{"lov": "PSL", "paragraf": "4", "found": false}, {"lov": "PSL", "paragraf": "11", "found": false}], "rate_check": {"expected_pcts": ["25,4", "33,4"], "missing": ["25,4", "33,4"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-010", "sec_checks": [{"lov": "ABL", "paragraf": "12", "found": true}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": {"expected_pcts": ["27", "42"], "missing": ["27", "42"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-011", "sec_checks": [{"lov": "PSL", "paragraf": "7", "found": true}, {"lov": "PSL", "paragraf": "8", "found": false}], "rate_check": {"expected_pcts": ["5,0", "7,5"], "missing": ["5,0", "7,5"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-012", "sec_checks": [{"lov": "PSL", "paragraf": "7", "found": true}], "rate_check": {"expected_pcts": ["7,5"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-014", "sec_checks": [{"lov": "ASKL", "paragraf": "9", "found": true}], "rate_check": {"expected_pcts": ["17"], "missing": ["17"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-015", "sec_checks": [{"lov": "KSL", "paragraf": "48 E", "found": false}], "rate_check": {"expected_pcts": ["27"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-016", "sec_checks": [{"lov": "SEL", "paragraf": "17", "found": false}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": {"expected_pcts": ["22", "27", "42", "56"], "missing": ["22", "27", "42", "56"]}, "n_rows": 2, "git_sha": "56f2719", "env": {}}
+{"id": "gs-017", "sec_checks": [{"lov": "MOMSL", "paragraf": "33", "found": false}], "rate_check": {"expected_pcts": ["25"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-018", "sec_checks": [{"lov": "LL", "paragraf": "9 B", "found": false}], "rate_check": null, "n_rows": 0, "git_sha": "56f2719", "env": {}}
+{"id": "gs-019", "sec_checks": [{"lov": "BAL", "paragraf": "22", "found": null, "note": "law not in graph (D1/D2)"}], "rate_check": null, "n_rows": 3, "git_sha": "56f2719", "env": {}}
+{"id": "gs-020", "sec_checks": [{"lov": "LL", "paragraf": "16", "found": true}], "rate_check": {"expected_pcts": ["20", "25"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-021", "sec_checks": [{"lov": "ABL", "paragraf": "13", "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-022", "sec_checks": [{"lov": "KSL", "paragraf": "2", "found": false}, {"lov": "KSL", "paragraf": "2", "found": false}], "rate_check": null, "n_rows": 2, "git_sha": "56f2719", "env": {}}
+{"id": "gs-023", "sec_checks": [{"lov": "PSL", "paragraf": "13", "found": true}, {"lov": "PSL", "paragraf": "13 a", "found": false}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-024", "sec_checks": [{"lov": "LL", "paragraf": "2", "found": false}, {"lov": "LL", "paragraf": "16 A", "found": false}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": {"expected_pcts": ["27", "42"], "missing": ["27", "42"]}, "n_rows": 3, "git_sha": "56f2719", "env": {}}
+{"id": "gs-025", "sec_checks": [{"lov": "LL", "paragraf": "7 P", "found": true}, {"lov": "ABL", "paragraf": "12", "found": true}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": {"expected_pcts": ["27", "42"], "missing": ["27", "42"]}, "n_rows": 9, "git_sha": "56f2719", "env": {}}
+{"id": "gs-028", "sec_checks": [{"lov": "LL", "paragraf": ["9 B", "9 C", "9 A"], "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-029", "sec_checks": [{"lov": "ABL", "paragraf": "12", "found": true}], "rate_check": null, "n_rows": 1, "git_sha": "56f2719", "env": {}}
+{"id": "gs-030", "sec_checks": [{"lov": "SEL", "paragraf": "17", "found": true}], "rate_check": {"expected_pcts": ["22"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-040", "sec_checks": [{"lov": "SEL", "paragraf": "17", "found": false}], "rate_check": {"expected_pcts": ["22", "25"], "missing": ["25"]}, "n_rows": 1, "git_sha": "56f2719", "env": {}}
+{"id": "gs-041", "sec_checks": [{"lov": "PSL", "paragraf": "4", "found": false}], "rate_check": null, "n_rows": 0, "git_sha": "56f2719", "env": {}}
+{"id": "gs-042", "sec_checks": [{"lov": "ABL", "paragraf": "12", "found": true}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-043", "sec_checks": [{"lov": "KGL", "paragraf": "14", "found": false}, {"lov": "PSL", "paragraf": "4", "found": false}], "rate_check": null, "n_rows": 11, "git_sha": "56f2719", "env": {}}
+{"id": "gs-044", "sec_checks": [{"lov": "FBL", "paragraf": "11", "found": false}, {"lov": "SEL", "paragraf": "17", "found": false}], "rate_check": {"expected_pcts": ["22"], "missing": ["22"]}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-045", "sec_checks": [{"lov": "MOMSL", "paragraf": "48", "found": false}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-046", "sec_checks": [{"lov": "KSL", "paragraf": "1", "found": false}, {"lov": "KSL", "paragraf": "7", "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-047", "sec_checks": [{"lov": "LL", "paragraf": "9 J", "found": false}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-048", "sec_checks": [{"lov": "PSL", "paragraf": "10", "found": true}], "rate_check": null, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-049", "sec_checks": [{"lov": "LL", "paragraf": "8", "found": true}], "rate_check": {"expected_pcts": ["25"], "missing": []}, "n_rows": 15, "git_sha": "56f2719", "env": {}}
+{"id": "gs-050", "sec_checks": [{"lov": "LL", "paragraf": "16 A", "found": false}, {"lov": "PSL", "paragraf": "4 a", "found": false}, {"lov": "PSL", "paragraf": "8 a", "found": false}], "rate_check": {"expected_pcts": ["27", "42"], "missing": ["42"]}, "n_rows": 6, "git_sha": "56f2719", "env": {}}
