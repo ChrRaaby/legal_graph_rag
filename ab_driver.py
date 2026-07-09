@@ -33,7 +33,8 @@ def done_ids(path: Path) -> set:
 def run_cell(cell: str, ids: list, args) -> bool:
     final = REPO / f"eval_results_{args.prefix}_{cell}.jsonl"
     env = dict(os.environ, OMP_NUM_THREADS="1", PYTHONUNBUFFERED="1")
-    env[args.env_var] = cell
+    for var in args.env_var.split(","):
+        env[var.strip()] = cell
     last, stall = -1, 0
     for attempt in range(1, args.max_attempts + 1):
         done = done_ids(final)
@@ -67,7 +68,8 @@ def run_cell(cell: str, ids: list, args) -> bool:
 
 def main() -> int:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--env-var", required=True, help="escape-hatch env var, set to on/off per cell")
+    ap.add_argument("--env-var", required=True,
+                    help="escape-hatch env var(s), comma-separated — all set to on/off per cell (combined confirmatory cells)")
     ap.add_argument("--prefix", required=True, help="output prefix: eval_results_<prefix>_{on,off}.jsonl")
     ap.add_argument("--item-ids", default=None, help="comma-separated subset (default: full golden set)")
     ap.add_argument("--golden-set", default="eval_golden_set.json")
