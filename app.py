@@ -1035,12 +1035,14 @@ Question: {question}""",
         ORDER BY vector_score DESC
         LIMIT $limit
         """
-        # C7: over-fetch, drop byte-identical duplicate rows (multi-version laws
-        # embed unchanged §-texts as separate Text nodes), then truncate — frees
-        # the wasted slots for genuinely distinct content. Keep the first (=
-        # highest-scored) row of each text; ORDER BY makes this deterministic.
-        _fetch = limit * 2 if C7_ROW_DEDUP else limit
-        rows = analysis.run_query(query, {"hits": hits, "limit": _fetch})
+        # C7b: drop byte-identical duplicate rows (multi-version laws embed
+        # unchanged §-texts as separate Text nodes) WITHOUT over-fetching — the
+        # result is strictly fewer rows, same distinct content: a true narrowing
+        # that shortens the context. (C7's over-fetch+backfill variant measured
+        # judge −6: the backfilled rows were context ADDITION — see backlog C7.)
+        # Keep the first (= highest-scored) row of each text; ORDER BY makes
+        # this deterministic.
+        rows = analysis.run_query(query, {"hits": hits, "limit": limit})
         if C7_ROW_DEDUP:
             _seen_txt: set = set()
             _unique = []
@@ -1050,7 +1052,7 @@ Question: {question}""",
                     continue
                 _seen_txt.add(key)
                 _unique.append(r)
-            rows = _unique[:limit]
+            rows = _unique
 
         # Prepend direct § lookup rows (dedup by section+paragraph number so
         # they don't duplicate vector hits that happened to surface the same node).
