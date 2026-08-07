@@ -46,8 +46,16 @@ false-positive asymmetry).
 Classifier gate live in `app.py` behind `F_SCOPE_GUARD`; fixture baseline
 **50/50 (46/46 false-positive non-regression, 4/4 refuse items migrated)**;
 42 replay assertions, Playwright green. Details: backlog Phase F + spec §5b.
-### F2. Golden-set guardrail items ☐ — **NEXT; user is the legal-review gate.** Draft per spec §5 (≥3 blocked per flag, ≥4 must-pass-through traps, injection pair) — `scratchpad/f1_scope_cases.json` holds 29 verified candidate cases to promote. Includes the gs-039 rework.
-### F3. Measured matched pair, L2 gate ☐ — after F2; footprint ≈ blocked items only
+### F2. Golden-set guardrail items ⏳ — **items landed (gs-051–gs-069, set v4.2, 69 items); agent re-verification BLOCKED on Gemini credits**
+Cases approved by user 2026-08-02. L0 fixture **69/69** (53/53 false-positive
+non-regression), 30 offline checks, original 50 byte-identical. Found and fixed a
+real F1 gap: the classifier prompt never encoded §2's *mixed prompts* rule, making
+it **50/50 unstable at temp 0** on a tax question with a non-tax request attached
+— now 8/8 stable. ⚠ **Outstanding: re-run gs-051–gs-069 through the agent once
+credits are restored** (last full run 16/19, pre-fix; expect 19/19). Spec §5c.
+- ☐ **gs-039 rework** still open — separate from these items, asserts PBL § 16
+  values and needs your legal review.
+### F3. Measured matched pair, L2 gate ☐ — after F2's re-run; footprint ≈ blocked items only. **Costs API credits.**
 
 ---
 

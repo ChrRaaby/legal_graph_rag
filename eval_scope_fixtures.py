@@ -57,13 +57,19 @@ def main() -> int:
         if args.item_ids:
             wanted = {s.strip() for s in args.item_ids.split(",")}
             items = [i for i in items if i["id"] in wanted]
-        # Expected flag per item: the 4 `refuse` items ask for help with unlawful
-        # acts, so the gate SHOULD flag them illegal — spec §2.2 migrates that
-        # class from the agent's AFVIS prompt section to the gate. Every other
-        # golden item is in-scope tax content and must raise NO flag; that subset
-        # is the false-positive non-regression this fixture exists to protect.
+        # Expected flag is derived from expected_behavior, so the fixture stays
+        # correct as the set grows. `refuse` items ask for help with unlawful
+        # acts and SHOULD flag illegal — spec §2.2 migrates that class from the
+        # agent's AFVIS prompt section to the gate. Everything not in this map is
+        # in-scope content that must raise NO flag; that subset is the
+        # false-positive non-regression this fixture exists to protect.
+        BEHAVIOR_TO_FLAG = {
+            "refuse": "illegal",
+            "out_of_scope": "non_tax",
+            "pii_block": "pii",
+        }
         cases = [{"id": i["id"], "question": i["question"],
-                  "expect": "illegal" if i.get("expected_behavior") == "refuse" else None}
+                  "expect": BEHAVIOR_TO_FLAG.get(i.get("expected_behavior"))}
                  for i in items]
     else:
         raw = json.loads(Path(args.expect_file).read_text(encoding="utf-8"))
@@ -102,10 +108,11 @@ def main() -> int:
         fp = [r for r in inscope if r["got"]]
         print(f"  FALSE-POSITIVE NON-REGRESSION: {len(inscope) - len(fp)}/{len(inscope)} "
               f"in-scope items raised no flag" + ("  ← REGRESSION" if fp else "  ✓"))
-        refuse = [r for r in results if r["expect"] == "illegal"]
-        if refuse:
-            hit = sum(1 for r in refuse if r["got"] == "illegal")
-            print(f"  refuse-class migration: {hit}/{len(refuse)} flagged illegal by the gate")
+        for flag in ("illegal", "non_tax", "pii"):
+            grp = [r for r in results if r["expect"] == flag]
+            if grp:
+                hit = sum(1 for r in grp if r["got"] == flag)
+                print(f"  {flag:<8} items blocked as expected: {hit}/{len(grp)}")
     print("=" * 62)
 
     if args.output:

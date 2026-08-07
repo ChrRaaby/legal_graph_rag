@@ -1722,6 +1722,8 @@ non_tax = true: spørgsmålet handler ikke om dansk skatteret.
     - investeringsrådgivning ("hvilken aktie bør jeg købe?")
     - alt uden relation til skat (opskrifter, kode, geografi, jokes, sport)
 
+BLANDEDE PROMPTS: Indeholder prompten BÅDE et ægte skattespørgsmål OG en ikke-skat-anmodning, sættes non_tax = false. Agenten besvarer skattedelen og lader resten ligge. Blokér kun på non_tax, hvis der slet ikke er et skattefagligt spørgsmål i prompten.
+
 Spørgsmålet kan være en opfølgning i en samtale — brug historikken til at forstå konteksten.
 
 VIGTIGT om "reason": gengiv ALDRIG personoplysninger i begrundelsen. Skriv fx "spørgsmålet indeholder et CPR-nummer" — aldrig selve nummeret, navnet eller adressen. Begrundelsen gemmes i loggen."""

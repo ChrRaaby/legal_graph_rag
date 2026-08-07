@@ -72,9 +72,22 @@ import json  # noqa: E402
 gs = json.loads((REPO / "eval_golden_set.json").read_text(encoding="utf-8"))
 items = gs["items"] if isinstance(gs, dict) and "items" in gs else gs
 new_sigs = SIG["out_of_scope"] + SIG["pii_block"]
-bad = [(i["id"], s) for i in items for s in new_sigs
+# F2 gate items legitimately carry the templates as their expected_answer — they
+# are tagged f1_gate. The regression this guards against is a NON-gate item
+# accidentally tripping a new signal and being reclassified.
+non_gate = [i for i in items if "f1_gate" not in (i.get("tags") or [])]
+bad = [(i["id"], s) for i in non_gate for s in new_sigs
        if s in (i.get("expected_answer", "") or "").lower()]
-check("no golden expected_answer contains a new gate signal", not bad, f"{bad}")
+check(f"no non-gate expected_answer contains a new gate signal ({len(non_gate)} items)",
+      not bad, f"{bad}")
+
+# And the gate items must each detect as the class they claim.
+gate_items = [i for i in items if "f1_gate" in (i.get("tags") or [])]
+mismatch = [i["id"] for i in gate_items
+            if i["expected_behavior"] in ("out_of_scope", "pii_block")
+            and eval_run.detect_behavior(i["expected_answer"]) != i["expected_behavior"]]
+check(f"every blocked gate item's expected_answer detects as its own class "
+      f"({len(gate_items)} gate items)", not mismatch, f"{mismatch}")
 
 print("\n=== verify 2: hatch F_SCOPE_GUARD=off removes the classifier from the path ===")
 check("F_SCOPE_GUARD default is on", app.F_SCOPE_GUARD is True)

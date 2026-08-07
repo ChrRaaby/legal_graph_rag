@@ -328,7 +328,12 @@ rule 4 (2-tuple), rule 5 (app.py single source), rule 8 (never print .env)."*
 6. UI: gate event renders in Kredsløbet/Tankestrømmen (dev shows flag+reason; user mode
    shows only the template reply).
 
-### F2. Golden-set guardrail items ☐ (draft per spec §5; **user legal-review gate** before ground truth — includes the gs-039 rework, spec §4)
+### F2. Golden-set guardrail items ⏳ 2026-08-02 (Opus) — **items landed, agent re-run BLOCKED on depleted Gemini credits**
+- gs-051–gs-069 added (set **4.1 → 4.2**, 69 items); user approved the cases. Original 50 byte-identical; blocked items assert only the deterministic template (no legal content), traps assert via `must_not_contain` (never must_contain — the gs-039 lesson).
+- **Real find:** F1's classifier prompt never encoded §2's *mixed prompts* ruling → **50/50 unstable at temperature 0** on a prompt mixing a real tax question with a non-tax request (measured N=8; pure controls 8/8 stable). It blocked a legitimate tax question — the worst failure under the false-positive asymmetry. Rule added; re-measured 8/8 stable, L0 re-run 69/69. gs-068 kept as its regression guard.
+- Two authoring errors of mine, both corrected against observed behaviour: gs-064 → `clarify` (agent gave the prompt's clarify template, correct for an underspecified calculation), gs-067 → `answer` (my premise that straffebestemmelser live only in the unloaded skattekontrollov was wrong — KSL § 74 / ML § 81 / BAL § 41 carry them).
+- ⚠ **Left undone:** the full-agent re-run of the 19 items after those fixes. Gemini prepayment credits depleted mid-session (429 on flash AND flash-lite — billing, not rate limit). Last complete run 16/19 *pre-fix*. **Re-run before treating these as validated**; spec §5c has the command and the expectation (19/19).
+- gs-039 rework still open (asserts PBL § 16 values → user legal-review gate).
 ### F3. L2 matched pair ☐ (`F_SCOPE_GUARD` on/off, diff-first judging — footprint ≈ blocked items only; judge prompt must learn `out_of_scope`/`pii_block` first; §2 decision rule)
 
 ## Gated / parked (do NOT start without explicit user approval)
