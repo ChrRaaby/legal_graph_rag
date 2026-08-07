@@ -289,6 +289,42 @@ current look is acceptable (labels stay readable via the paint-order halo).
 
 **Phase B is absorbed:** do NOT build B2–B7 in Streamlit; B1 (APP_MODE) survives as a backend concept (see the doc's "Relationship to Phase B" for the interim-deploy decision rule).
 
+## Phase F — Guardrails classifier gate (design APPROVED 2026-08-02; F1 ready for Opus)
+
+**Spec: `whitepapers/guardrails_design.md` (v2)** — user-chosen architecture: one
+dedicated LLM classifier call (`classify_request`, pinned `gemini-3.5-flash-lite` via
+`SCOPE_CLASSIFIER_MODEL`, strict JSON, temp 0, question + last 4 history messages) in
+front of the agent, flagging **pii / illegal / non_tax**; any flag → deterministic
+Danish template (spec §3) with a `scope_gate` tool_event, no agent, no tools; no flags →
+pass-through **byte-identical to today**. Fail-open with warning event; PII prompts
+persisted as `[REDACTED-PII]`. Hatch `F_SCOPE_GUARD=off` = current behaviour exactly.
+All §6 decisions settled — do not reopen design questions; ambiguities not covered by
+the spec follow the escalation rule (§0.5).
+
+### F1. Implement the gate ☐ (Opus)
+**Kickoff prompt for the implementing session:** *"Read IMPROVEMENT_BACKLOG.md Phase F
+and whitepapers/guardrails_design.md (the approved spec), then implement F1: the
+classifier gate per spec §1, templates §3, decisions §6. Ground rules §0 apply — esp.
+rule 4 (2-tuple), rule 5 (app.py single source), rule 8 (never print .env)."*
+**Verify (all before calling it done):**
+1. Probe `gemini-3.5-flash-lite` with one tiny generateContent call + a strict-JSON
+   Danish smoke before wiring it in (traps index; fall back per spec §6.1).
+2. `F_SCOPE_GUARD=off` → agent path byte-identical (C5-style hatch verification).
+3. Signal-collision asserts: non_tax template matches NO refuse/clarify/admit_unknown/
+   correct_premise signals; illegal template DOES match refuse signals. Extend the live
+   scorer path (eval_run-imported), not app.py's stale copy (A1 debt, spec §3).
+4. Classify-only fixture over all 50 golden questions (~50 lite calls, no agent):
+   **expect 0 flags** — this is the false-positive non-regression and the L0-equivalent
+   for every future classifier-prompt iteration. Save as `eval_fixtures`-style script.
+5. Agent smokes: gs-026 (illegal → gate template keeps its checks green), gs-001
+   (typical → passes through, tools fire normally), one PII probe (flag + redaction in
+   mr_runs verified), one non_tax probe ("fortæl mig en joke").
+6. UI: gate event renders in Kredsløbet/Tankestrømmen (dev shows flag+reason; user mode
+   shows only the template reply).
+
+### F2. Golden-set guardrail items ☐ (draft per spec §5; **user legal-review gate** before ground truth — includes the gs-039 rework, spec §4)
+### F3. L2 matched pair ☐ (`F_SCOPE_GUARD` on/off, diff-first judging — footprint ≈ blocked items only; judge prompt must learn `out_of_scope`/`pii_block` first; §2 decision rule)
+
 ## Gated / parked (do NOT start without explicit user approval)
 
 | Item | Where documented | Gate |
@@ -305,7 +341,7 @@ current look is acceptable (labels stay readable via the paint-order halo).
 - `pkill -f eval_run` self-kills → kill by PID.
 - Ollama from WSL2 = `http://172.21.64.1:11434`, not localhost. Model stalls silently if the user is gaming on the GPU.
 - Hosted `gemma-4-26b-a4b-it` on the Gemini API is free-tier TPM-capped regardless of billing → use the current flash for hosted runs.
-- **Google pulls model ids abruptly (measured 2026-07-09): `gemini-2.5-flash` AND `gemini-2.5-pro` 404'd MID-SESSION** (2.5-pro died <1h after serving the confirmatory judge; 2.5-flash still appears in the models list but 404s on generate). Current ids: agent `gemini-3.5-flash`, judge `gemini-3.1-pro-preview` (no stable 3.5-pro exists). **Pin explicit ids, never aliases** (`gemini-flash-latest` silently re-points = institutionalized substrate drift), and probe with one tiny generateContent call before any long run. Flash-substrate history (all C-experiment cells to date) is 2.5-flash; comparisons across the model swap are invalid — same-night pairs absorb this. Old judge verdicts stay valid history (cache keys include judge_model).
+- **Gemini model ids can 404 TRANSIENTLY — do not conclude "pulled" from a mid-session 404 (revised 2026-08-02).** Measured 2026-07-09: `gemini-2.5-flash` AND `gemini-2.5-pro` 404'd mid-session (2.5-pro <1h after serving the confirmatory judge), and this entry originally recorded them as permanently withdrawn. **Re-probed 2026-08-02: both are ALIVE again** (listed *and* answering `generateContent`), as are `gemini-3-flash-preview`, `gemini-3.5-flash`, `gemini-3.1-pro-preview`, `gemma-4-31b-it`, `gemma-4-26b-a4b-it`. So a 404 is evidence of an outage/quota condition, not of removal — **re-probe before rewriting configs or declaring a substrate dead.** Everything else in this entry stands and is reinforced: **pin explicit ids, never aliases** (`gemini-flash-latest`/`gemini-pro-latest` exist and silently re-point = institutionalized substrate drift), and probe with one tiny generateContent call before any long run. Current ids: agent `gemini-3.5-flash`, judge `gemini-3.1-pro-preview` (no stable 3.5-pro exists; newer `gemini-3.6-flash` and `gemini-3-pro-preview` are now listed but switching to them is a substrate change = needs a matched pair, not a config edit). Flash-substrate history (all C-experiment cells to date) is 2.5-flash — still reproducible, since 2.5-flash lives; comparisons across a model swap remain invalid, same-night pairs absorb this. Old judge verdicts stay valid history (cache keys include judge_model).
 - Whole-corpus Spark loads break on cross-file JSON schema drift; new acts load via a single-file staging dir (see D1).
 - Aura hangs `build_runtime()` at startup sometimes → `build_runtime_with_retry` handles it; be patient before assuming a code hang.
 - Golden-set `must_contain` entries may be strings OR any-of lists — handle both (`_term_present` does).

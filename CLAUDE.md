@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **`IMPROVEMENT_BACKLOG.md` is the active execution plan** (phases A–D, ranked, with ground rules and the measurement protocol). Read it before starting any improvement work — its ground rules encode measured experimental evidence and override intuition (e.g. never force-inject extra data into retrieval output for the current 26B model).
 
+**`TODO.md` is the consolidated index** — every open item across all phases, one line each, including items found outside the backlog's phase structure. Start there to see what's open; go to the backlog for the evidence and reasoning behind any of it. New work graduates from TODO.md into the backlog once it has a design.
+
 ## Project Overview
 
 A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law.
