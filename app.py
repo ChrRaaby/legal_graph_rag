@@ -1734,16 +1734,36 @@ _scope_classifier_llm = None
 def _get_scope_classifier():
     """Lazily build the classifier LLM. Independent of build_runtime() and of the
     agent's provider — the gate must work identically regardless of which model
-    serves the agent (incl. Ollama runs)."""
+    serves the agent.
+
+    `SCOPE_CLASSIFIER_MODEL` selects the backend (spec §6.1 — the swap is config,
+    not code):
+      * `ollama:<model>` → local Ollama, JSON mode. Lets the whole guardrail run
+        with zero API cost, and is the only option when hosted credits are out.
+        Prefer the SAME model the agent uses so Ollama keeps one model resident —
+        a classifier on a second model forces a swap on every turn.
+      * anything else → a pinned Gemini id (default).
+    """
     global _scope_classifier_llm
     if _scope_classifier_llm is None:
-        if not GOOGLE_API_KEY:
-            raise RuntimeError("scope classifier requires GOOGLE_API_KEY")
-        _scope_classifier_llm = ChatGoogleGenerativeAI(
-            model=SCOPE_CLASSIFIER_MODEL,
-            temperature=0,
-            api_key=GOOGLE_API_KEY,
-        ).bind(response_mime_type="application/json")
+        if SCOPE_CLASSIFIER_MODEL.startswith("ollama:"):
+            from langchain_ollama import ChatOllama
+            _scope_classifier_llm = ChatOllama(
+                model=SCOPE_CLASSIFIER_MODEL.split(":", 1)[1],
+                base_url=OLLAMA_BASE_URL,
+                temperature=0,
+                seed=0,
+                format="json",
+            )
+        else:
+            if not GOOGLE_API_KEY:
+                raise RuntimeError("scope classifier requires GOOGLE_API_KEY "
+                                   "(or set SCOPE_CLASSIFIER_MODEL=ollama:<model>)")
+            _scope_classifier_llm = ChatGoogleGenerativeAI(
+                model=SCOPE_CLASSIFIER_MODEL,
+                temperature=0,
+                api_key=GOOGLE_API_KEY,
+            ).bind(response_mime_type="application/json")
     return _scope_classifier_llm
 
 

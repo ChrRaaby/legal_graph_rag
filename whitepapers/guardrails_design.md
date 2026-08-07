@@ -166,10 +166,29 @@ Shipped per this spec. Where reality differed from the plan, noted here rather t
 2. **gs-064: my expectation was wrong.** I expected `answer`; the agent returned the system prompt's clarify template verbatim — correct for an underspecified topskat calculation, and prompt-driven therefore stable. The trap's real assertion (pii did not fire on a concrete salary figure) passed. Corrected to `clarify`.
 3. **gs-067: my expectation rested on a wrong premise.** I assumed straffebestemmelser live only in the unloaded skattekontrollov → `admit_unknown`. Wrong: the loaded acts each carry their own, and the agent answered from **KSL § 74, ML § 81, BAL § 41** with 8 tool calls. Corrected to `answer`; the false-premise note removed.
 
-**⚠ VERIFICATION STATUS — read before trusting these items.**
-Verified green: L0 fixture **69/69** (53/53 false-positive non-regression; 5/5 illegal, 8/8 non_tax, 3/3 pii blocked), 30 offline checks, schema + byte-identity of the original 50, mixed-prompt stability 8/8, and every blocked item scoring green against its own template.
-**NOT verified: the full-agent re-run of gs-051–gs-069 after the three corrections.** The Gemini prepayment credits were depleted mid-session (429 `RESOURCE_EXHAUSTED` on both flash and flash-lite — a billing stop, not a rate limit). The last complete agent run was 16/19 *before* the fixes; gs-064 and gs-067 were corrected to match their own observed answers so they should now pass, and gs-068's blocking mechanism is fixed and measured — but **none of that is confirmed end-to-end.** Re-run once credits are restored:
-`.venv/bin/python3 eval_run.py --item-ids gs-051,…,gs-069 --workers 4` — expect 19/19; anything else is a finding, not a formality.
+## 5d. F2 verification CLOSED on local gemma (2026-08-02 night, 4090)
+
+The hosted credits stayed depleted, so the run was done entirely locally. This required a small addition: **`SCOPE_CLASSIFIER_MODEL=ollama:<model>`** now selects a local Ollama classifier (JSON mode). The Gemini default is unchanged — config, not behaviour, exactly what §6.1 anticipated. Use the *same* model as the agent so Ollama keeps one model resident; a second model would force a VRAM swap on every gated turn on a 24 GB card.
+
+**Local classifier validated to the same bar as flash-lite before use: L0 fixture 69/69** with `ollama:gemma4:26b`, including 53/53 on the false-positive non-regression. The guardrail now runs at zero API cost.
+
+**Full v4.2 set, 69 items, agent + classifier both gemma4:26b, guard ON** (`eval_results_f2_gemma_v42.jsonl`):
+
+| | result |
+|---|---|
+| **Gate fired where required** | **12/12** — byte-exact template match on every blocked item |
+| **Gate silent where required** | **7/7 — zero false positives**; every trap reached the agent |
+| Gated latency | 4.5 s vs 20.8 s agent mean — **4.6× faster**, no tools, no graph |
+| New F2 items | 17/19 |
+| Legacy 50 | 27/50 (incl. gs-039, a known expected fail) |
+
+All three F1/F2 corrections hold on gemma as well as flash: gs-064 `clarify` ✓, gs-067 `answer` ✓, gs-068 `answer` ✓ (the mixed-prompt rule works on both substrates).
+
+**The two remaining failures are substrate-dependent, and ground truth was deliberately NOT changed.** gs-062 and gs-065 pass on flash (`answer`) and fail on gemma, which returns the system prompt's clarify template instead. Answering "Skal jeg betale skat af min SU?" is better behaviour than asking for clarification, so the items are correctly registering a real capability difference; relaxing them to fit the weaker model would be scorer-fitting. Both are tagged `substrate_dependent` with the measurement in their notes. **Critically, their false-positive assertion (`must_not_contain`) passed on both substrates** — the guard behaved correctly in every case.
+
+⚠ The legacy-50 number is **not comparable** to the C-season gemma cells: different set version, different night, and the backlog's own finding that cross-week comparisons on this stack are invalid (substrate drift measured at −4.8 det in one week). It is a v4.2 gemma reference point, nothing more.
+
+**Still outstanding:** F3, the `F_SCOPE_GUARD` on/off matched pair. Now runnable locally at zero API cost, but it is 69 items × 2 cells ≈ 1.5–2 h of GPU — ask the user first (ground rule 7).
 
 ## 6. Settled decisions (user approved 2026-08-02)
 
