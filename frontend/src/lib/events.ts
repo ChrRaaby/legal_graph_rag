@@ -40,6 +40,11 @@ export type AgentEvent =
       content_full?: string;
       graph_refs?: GraphRef[];
     }
+  // F1 scope gate: the request was blocked before the agent ran. A gated run
+  // has no llm/tool events at all — this is the only event between run_start
+  // and the answer.
+  | { type: "scope_gate"; elapsed_s: number; node?: string; flag: "pii" | "illegal" | "non_tax"; reason: string; duration_s?: number }
+  | { type: "scope_gate_error"; elapsed_s: number; node?: string; reason: string }
   | { type: "citations"; items: Citation[] }
   | { type: "answer"; text: string }
   | { type: "done"; run_id?: string; latency_s: number; input_tokens?: number; output_tokens?: number }
@@ -66,6 +71,12 @@ export function formatKr(kr: number): string {
   if (kr < 0.01) return "<0,01 kr.";
   return `~${kr.toFixed(2).replace(".", ",")} kr.`;
 }
+
+export const SCOPE_FLAG_LABELS: Record<string, string> = {
+  pii: "Personoplysninger",
+  illegal: "Ulovlig anmodning",
+  non_tax: "Uden for skatteområdet",
+};
 
 const TOOL_LABELS: Record<string, string> = {
   Contextual_Text_Retriever: "Kontekst-søgning",
@@ -132,10 +143,16 @@ export function liveMaxMs(log: AgentEvent[]): number {
   let m = 0;
   for (const ev of log) {
     if (ev.type === "llm") m = Math.max(m, (ev.start_s + ev.duration_s) * 1000);
-    else if (ev.type === "tool_call" || ev.type === "tool_result")
+    else if (ev.type === "tool_call" || ev.type === "tool_result" || ev.type === "scope_gate")
       m = Math.max(m, ev.elapsed_s * 1000);
   }
   return m;
+}
+
+/** The gate verdict for this run, if it was blocked. */
+export function scopeGate(log: AgentEvent[]): Extract<AgentEvent, { type: "scope_gate" }> | null {
+  for (const ev of log) if (ev.type === "scope_gate") return ev;
+  return null;
 }
 
 /** Total run length (ms): the authoritative `done` latency, else latest event. */
@@ -204,6 +221,11 @@ export function captionSteps(log: AgentEvent[]): CaptionStep[] {
       steps.push({
         t: ev.elapsed_s * 1000,
         text: n != null ? `${n} resultat${n === 1 ? "" : "er"} hentet fra grafen${dur}` : `Resultat modtaget${dur}`,
+      });
+    } else if (ev.type === "scope_gate") {
+      steps.push({
+        t: ev.elapsed_s * 1000,
+        text: `Skjoldet blokerede spørgsmålet — ${SCOPE_FLAG_LABELS[ev.flag] ?? ev.flag}`,
       });
     } else if (ev.type === "done") {
       steps.push({ t: ev.latency_s * 1000, text: `Færdig · ${ev.latency_s.toFixed(1).replace(".", ",")} s` });

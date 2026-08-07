@@ -136,6 +136,24 @@ extend the live scorer path (eval_run-imported), not the stale app.py copy.
   maximally effective here. Judge prompt must learn `out_of_scope`/`pii_block` first.
   Decision rule per backlog §2.
 
+## 5b. F1 implementation record (2026-08-02, Opus)
+
+Shipped per this spec. Where reality differed from the plan, noted here rather than silently:
+
+- **Classifier probed first (verify 1):** `gemini-3.5-flash-lite` returned **16/16 correct verdicts, 0 malformed JSON, 0.62 s mean latency** on a Danish case set covering all three flags plus the adjacent band and a bare follow-up. No fallback to flash needed. Probe kept at `scratchpad/f1_probe_classifier.py`.
+- **Two bugs caught during implementation, both would have shipped silently:**
+  1. `resp.content` from `ChatGoogleGenerativeAI` is a **list of blocks**, not a string — the naive `str()` fallback produced unparseable JSON, which fail-open would have swallowed on *every* call, disabling the gate invisibly. Now parsed via the existing `_extract_llm_thinking`, plus defensive fence-stripping.
+  2. **PII leaked into the persisted event log.** Redacting only `mr_runs.question` was insufficient: the `run_start` event carries its own copy of the question and the whole event list is stored as JSON. `_persist_run` now scrubs both, asserted by the smoke.
+- **Refuse-class migration confirmed working.** gs-026/034/035/036 are now answered by the gate: **still 4/4 passing**, at 0.5 s and `tools=0` versus 17–29 s for pass-through items. The illegal template trips the `refuse` signals by design, which is what keeps them green.
+- **Fixture expectation corrected.** The first `eval_scope_fixtures.py` run flagged those same four items as "unexpected", because the fixture naively expected zero flags on all 50. The right model is per-item: `expected_behavior == "refuse"` → expect `illegal`, everything else → expect no flag. Baseline now **50/50, with the false-positive non-regression reported separately as 46/46**.
+- **Guard node in Kredsløbet** ("Skjoldet") sits between Bruger and Agent and is part of the idle diagram too — the gate is genuinely always in the path, so drawing it only on blocked runs would misrepresent the runtime.
+
+**Verification status:** 22 offline checks, 50/50 golden fixture (46/46 false-positive non-regression), 29/29 guardrail cases, 4/4 agent smokes via eval_run, 13 end-to-end gate smokes incl. real `_persist_run` redaction, 42 frontend replay assertions (12 new), frontend build clean.
+
+**Not done here (correctly out of F1 scope):** F2 golden items and the F3 matched pair. Until F2 lands, the `out_of_scope`/`pii_block` behaviours have no golden coverage — `eval_scope_fixtures.py --expect-file scratchpad/f1_scope_cases.json` is the interim guard.
+
+**Follow-up worth doing (not blocking):** `eval_scope_fixtures.py` needs only `classify_request`, but importing `app` pulls in the whole runtime (Neo4j + e5 embeddings on CUDA), so the "cheap L0 rung" pays a heavy startup and inherits the WSL2 torch segfault trap — it needed a retry loop during F1 verification. Ground rule 5 keeps `classify_request` in app.py, so the fix is not to move it; the options are a lazy-import seam or a small `--no-runtime` path. Until then, run the fixture under a retry loop like every other torch-importing script here.
+
 ## 6. Settled decisions (user approved 2026-08-02)
 
 1. **Classifier model:** pin `gemini-3.5-flash-lite`. **Probe it before first use**

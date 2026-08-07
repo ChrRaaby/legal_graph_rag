@@ -164,6 +164,14 @@ GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", GEMINI_MODEL).spl
 AGENT_RETRIEVAL_K = int(os.getenv("AGENT_RETRIEVAL_K", 10))
 AGENT_HISTORY_MESSAGES = int(os.getenv("AGENT_HISTORY_MESSAGES", 20))
 DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
+# F1: scope guardrails. One classifier LLM call in front of the agent flags
+# pii / illegal / non_tax; a flagged prompt gets a deterministic template answer
+# and never reaches the agent. Unflagged prompts pass through byte-identically.
+# Escape hatch for the matched-pair protocol: F_SCOPE_GUARD=off skips the
+# classifier entirely, reproducing pre-F1 behavior exactly.
+F_SCOPE_GUARD = os.getenv("F_SCOPE_GUARD", "on").strip().lower() not in ("0", "off", "false", "no")
+SCOPE_CLASSIFIER_MODEL = os.getenv("SCOPE_CLASSIFIER_MODEL", "gemini-3.5-flash-lite")
+SCOPE_HISTORY_MESSAGES = int(os.getenv("SCOPE_HISTORY_MESSAGES", 4))
 # C2: constrain the direct-§ lookup in retrieve_text_with_context to the law named
 # in the query and to the in-force version (pure narrowing — removes wrong-law /
 # historic-version rows). Escape hatch for the matched-pair A/B protocol:
@@ -1653,6 +1661,147 @@ def _extract_llm_thinking(content) -> tuple[str, str]:
     return thinking, text
 
 
+# ── F1: scope guardrails (classifier gate) ────────────────────────────────────
+# One cheap LLM call in front of the agent. Flags pii / illegal / non_tax; a
+# flagged prompt gets a deterministic Danish template and never reaches the
+# agent (no tools, no Neo4j). Unflagged prompts pass through untouched, so the
+# treatment surface of this change is exactly the blocked set.
+# Spec: whitepapers/guardrails_design.md (v2, approved 2026-08-02).
+
+SCOPE_FLAGS = ("pii", "illegal", "non_tax")
+
+# Deterministic replies (spec §3). Wording is load-bearing for behavior
+# detection: the illegal template deliberately trips the `refuse` signals (it IS
+# a refusal — keeps gs-026/034/035/036 green now that the gate answers them
+# before the agent), while pii/non_tax must trip only their own new signals.
+# scratchpad/f1_signal_collision.py asserts both directions.
+SCOPE_TEMPLATES: dict[str, str] = {
+    "pii": (
+        "Dit spørgsmål ser ud til at indeholde personoplysninger (fx CPR-nummer eller navn). "
+        "Af hensyn til dit privatliv behandler jeg ikke personoplysninger — stil gerne "
+        "spørgsmålet igen i generel form, fx \"en person med…\"."
+    ),
+    "illegal": (
+        "Det vil jeg ikke hjælpe med — det, du beskriver, kan udgøre skatteunddragelse "
+        "eller anden ulovlig adfærd. Jeg forklarer gerne de lovlige regler på området i stedet."
+    ),
+    "non_tax": (
+        "Det ligger uden for mit område — jeg svarer kun på spørgsmål om dansk "
+        "skattelovgivning. Du er velkommen til at spørge om fx fradrag, moms, "
+        "aktiebeskatning eller boafgift."
+    ),
+}
+
+_SCOPE_CLASSIFIER_PROMPT = """Du er en klassifikator for en dansk skatteassistent. Du vurderer, om et brugerspørgsmål skal blokeres.
+
+Svar KUN med JSON på præcis denne form:
+{"pii": false, "illegal": false, "non_tax": false, "reason": "kort begrundelse på dansk"}
+Ingen markdown, ingen tekst uden for JSON.
+
+GRUNDREGEL: Er du i tvivl, så sæt ALLE flag til false. Det er værre at blokere et ægte skattespørgsmål end at lade et grænsetilfælde passere.
+
+pii = true: spørgsmålet indeholder oplysninger, der identificerer en konkret person — CPR-nummer, navn kombineret med adresse, helbredsoplysninger, konkrete kontonumre.
+  IKKE pii: abstrakte eller generelle tal og eksempler ("en person med en årsløn på 600.000 kr.", "min løn er 45.000 kr."). Sådan stilles skattespørgsmål normalt.
+
+illegal = true: brugeren beder om hjælp til ulovlige handlinger — skatteunddragelse, skjulning af aktiver, fiktive fakturaer, sort arbejde.
+  IKKE illegal: spørgsmål om hvad loven SIGER om ulovlige forhold ("hvad er straffen for skattesvig?") — det er lovinformation.
+
+non_tax = true: spørgsmålet handler ikke om dansk skatteret.
+  Afgørende: handler spørgsmålet om beskatning eller afgift efter dansk ret? Så er det IKKE non_tax.
+  Lad passere (non_tax = false):
+    - beskatning af hvad som helst ("skal jeg betale skat af min SU?")
+    - boafgift, moms, fradrag, aktiebeskatning, selskabsskat
+    - danske regler om udenlandsk indkomst (dobbeltbeskatning, begrænset skattepligt)
+    - meta-spørgsmål om assistenten selv ("hvilke love kender du?")
+    - skattelove, der måske ikke er indlæst i vidensgrafen — det er et dækningsspørgsmål, ikke et emnespørgsmål
+  Blokér (non_tax = true):
+    - størrelse eller berettigelse af ydelser (dagpenge, SU-satser, boligstøtte)
+    - tilgrænsende jura betragtet som jura (arveret, selskabsret, ansættelsesret)
+    - bogføringsmekanik uden skattemæssig vinkel
+    - andre landes interne skatteret
+    - investeringsrådgivning ("hvilken aktie bør jeg købe?")
+    - alt uden relation til skat (opskrifter, kode, geografi, jokes, sport)
+
+Spørgsmålet kan være en opfølgning i en samtale — brug historikken til at forstå konteksten.
+
+VIGTIGT om "reason": gengiv ALDRIG personoplysninger i begrundelsen. Skriv fx "spørgsmålet indeholder et CPR-nummer" — aldrig selve nummeret, navnet eller adressen. Begrundelsen gemmes i loggen."""
+
+_scope_classifier_llm = None
+
+
+def _get_scope_classifier():
+    """Lazily build the classifier LLM. Independent of build_runtime() and of the
+    agent's provider — the gate must work identically regardless of which model
+    serves the agent (incl. Ollama runs)."""
+    global _scope_classifier_llm
+    if _scope_classifier_llm is None:
+        if not GOOGLE_API_KEY:
+            raise RuntimeError("scope classifier requires GOOGLE_API_KEY")
+        _scope_classifier_llm = ChatGoogleGenerativeAI(
+            model=SCOPE_CLASSIFIER_MODEL,
+            temperature=0,
+            api_key=GOOGLE_API_KEY,
+        ).bind(response_mime_type="application/json")
+    return _scope_classifier_llm
+
+
+def classify_request(question: str, recent_history: Optional[list[tuple[str, str]]] = None) -> dict:
+    """Classify one user prompt. Returns {pii, illegal, non_tax, reason, error?}.
+
+    Raises nothing — on any failure returns all-false flags plus an `error` key,
+    so callers fail open (spec §6.3). `recent_history` is (role, content) pairs.
+    """
+    verdict = {f: False for f in SCOPE_FLAGS}
+    verdict["reason"] = ""
+    try:
+        parts = []
+        if recent_history:
+            hist = "\n".join(
+                f"{r}: {c}" for r, c in recent_history[-SCOPE_HISTORY_MESSAGES:]
+            )
+            parts.append(f"Samtalehistorik (seneste beskeder):\n{hist}\n")
+        parts.append(f"Brugerens spørgsmål:\n{question}")
+        resp = _get_scope_classifier().invoke(
+            [("system", _SCOPE_CLASSIFIER_PROMPT), ("human", "\n".join(parts))]
+        )
+        # Gemini returns content as a list of blocks; reuse the existing
+        # extractor so thinking blocks never reach the JSON parser.
+        _, raw = _extract_llm_thinking(resp.content)
+        raw = re.sub(r"^\s*```(?:json)?|```\s*$", "", raw.strip()).strip()
+        parsed = json.loads(raw)
+        for f in SCOPE_FLAGS:
+            verdict[f] = parsed.get(f) is True
+        verdict["reason"] = str(parsed.get("reason", ""))[:300]
+    except Exception as exc:  # fail open — a guardrail outage must not block answers
+        verdict = {f: False for f in SCOPE_FLAGS}
+        verdict["reason"] = ""
+        verdict["error"] = f"{type(exc).__name__}: {exc}"[:300]
+        print(f"[WARN:SCOPE_GUARD] classifier failed, failing open — {verdict['error']}")
+    return verdict
+
+
+def scope_flag(verdict: dict) -> Optional[str]:
+    """First raised flag in fixed precedence, or None. pii wins so the raw prompt
+    gets redacted even when the request is also illegal or off-topic."""
+    return next((f for f in SCOPE_FLAGS if verdict.get(f)), None)
+
+
+REDACTED_PII = "[REDACTED-PII]"
+
+
+def redact_if_pii(question: str, tool_events: list[dict]) -> str:
+    """Return the question, or the redaction marker if this run was pii-gated.
+
+    Decided from tool_events so every persistence path (mr_runs, eval_log.jsonl,
+    eval result records) inherits it without changing signatures — a caller
+    cannot forget to redact. Spec §6.4: the raw prompt goes to the classifier
+    call and nowhere else.
+    """
+    if any(e.get("type") == "scope_gate" and e.get("flag") == "pii" for e in tool_events or []):
+        return REDACTED_PII
+    return question
+
+
 def stream_agent_answer(
     agent_executor,
     chat_messages: list[dict],
@@ -1680,6 +1829,34 @@ def stream_agent_answer(
     _question = next(
         (c for r, c in reversed(lc_messages) if r == "user"), ""
     )
+
+    # F1 scope gate: classify before any graph work. A flagged prompt returns the
+    # deterministic template with a single scope_gate event and never reaches the
+    # agent. F_SCOPE_GUARD=off skips this block entirely (pre-F1 behavior).
+    if F_SCOPE_GUARD and _question:
+        _verdict = classify_request(_question, lc_messages[:-1])
+        _flag = scope_flag(_verdict)
+        if _flag:
+            _gate_event = {
+                "elapsed_s": round(time.perf_counter() - run_start, 3),
+                "node": "scope_gate",
+                "type": "scope_gate",
+                "flag": _flag,
+                "reason": _verdict.get("reason", ""),
+                "duration_s": round(time.perf_counter() - run_start, 3),
+            }
+            tool_events.append(_gate_event)
+            if on_tool_event:
+                on_tool_event(tool_events)
+            return SCOPE_TEMPLATES[_flag], tool_events
+        if _verdict.get("error"):
+            tool_events.append({
+                "elapsed_s": round(time.perf_counter() - run_start, 3),
+                "node": "scope_gate",
+                "type": "scope_gate_error",
+                "reason": _verdict["error"],
+            })
+
     _section_facts = _verify_section_references(_RUNTIME_ANALYSIS, _question)
     _preamble = _existence_preamble(_section_facts)
     if _preamble and lc_messages:
@@ -1811,7 +1988,7 @@ def log_trajectory(question: str, answer: str, tool_events: list[dict], total_la
     tool_calls = [e for e in tool_events if e["type"] == "tool_call"]
     record = {
         "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "question": question,
+        "question": redact_if_pii(question, tool_events),
         "answer": answer,
         "total_latency_s": round(total_latency_s, 3),
         "step_count": len(tool_calls),
@@ -1839,6 +2016,13 @@ def _eval_normalize(text: str) -> str:
     return text
 
 
+# ⚠ STALE COPY — used only by the deprecated Streamlit eval panel, which is
+# itself broken on the current golden set (backlog A1: it crashes on any-of
+# `must_contain` lists). The LIVE scorer is eval_run.py's BEHAVIOR_SIGNALS /
+# detect_behavior / score_item; that is what eval_run, ab_judge and the
+# Maskinrummet Eval lens use. F1's `out_of_scope` / `pii_block` classes were
+# added THERE, deliberately not here — extending a dead copy would deepen the
+# fork A1 exists to remove. Do not add behaviors below; fix A1 instead.
 _BEHAVIOR_SIGNALS: dict[str, list[str]] = {
     "refuse": ["vil jeg ikke", "hjælper ikke med", "kan ikke hjælpe", "ulovlig", "skatteunddragelse"],
     "clarify": ["kan du oplyse", "hvad mener du", "mere information", "præcisere", "uddybe"],

@@ -42,9 +42,12 @@ approved). v1's layered approach rejected by user as overcomplicated; v1 evidenc
 retained in spec §4 (embedding gates falsified by probe, scope-vs-coverage,
 false-positive asymmetry).
 
-### F1. Implement the gate ☐ — **READY FOR OPUS: kickoff prompt + 6 verify steps in IMPROVEMENT_BACKLOG.md Phase F**
-### F2. Golden-set guardrail items ☐ — blocked on F1; user is the legal-review gate (includes gs-039 rework)
-### F3. Measured matched pair, L2 gate ☐ — after F1/F2; footprint ≈ blocked items only
+### F1. Implement the gate ☑ DONE 2026-08-02 (Opus) — all 6 verify steps green
+Classifier gate live in `app.py` behind `F_SCOPE_GUARD`; fixture baseline
+**50/50 (46/46 false-positive non-regression, 4/4 refuse items migrated)**;
+42 replay assertions, Playwright green. Details: backlog Phase F + spec §5b.
+### F2. Golden-set guardrail items ☐ — **NEXT; user is the legal-review gate.** Draft per spec §5 (≥3 blocked per flag, ≥4 must-pass-through traps, injection pair) — `scratchpad/f1_scope_cases.json` holds 29 verified candidate cases to promote. Includes the gs-039 rework.
+### F3. Measured matched pair, L2 gate ☐ — after F2; footprint ≈ blocked items only
 
 ---
 

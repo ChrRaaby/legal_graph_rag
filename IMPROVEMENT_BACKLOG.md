@@ -301,7 +301,13 @@ persisted as `[REDACTED-PII]`. Hatch `F_SCOPE_GUARD=off` = current behaviour exa
 All §6 decisions settled — do not reopen design questions; ambiguities not covered by
 the spec follow the escalation rule (§0.5).
 
-### F1. Implement the gate ☐ (Opus)
+### F1. Implement the gate ☑ DONE 2026-08-02 (Opus) — **all 6 verify steps green**
+- **Shipped:** `classify_request()` + `SCOPE_TEMPLATES` + `scope_flag()` + `redact_if_pii()` in app.py; gate at the top of `stream_agent_answer` before any graph work; `out_of_scope`/`pii_block` in eval_run's live scorer + judge `_BEHAVIOR_DA`; PII scrub in `server._persist_run` and `log_trajectory`; Skjoldet node in Kredsløbet + gate card in Tankestrømmen. New: `eval_scope_fixtures.py` (the L0 rung).
+- **Verify results:** (1) flash-lite probed 16/16 verdicts, 0 bad JSON, 0.62 s — no fallback needed. (2) hatch verified both ways: flag parsing in-process + `scratchpad/f1_hatch_off_check.py` proves a would-be-blocked prompt reaches the agent with a poisoned classifier. (3) signal collisions asserted both directions. (4) **fixture baseline 50/50 — 46/46 false-positive non-regression, 4/4 refuse items correctly flagged illegal** (`eval_fixtures_scope_baseline.jsonl`). (5) eval_run 4/4 (gs-026/034 gated at 0.5 s tools=0; gs-001/002 pass through 17–29 s); 13 end-to-end gate smokes incl. real `_persist_run` redaction; SSE endpoint verified. (6) 42 replay assertions (12 new), frontend build clean, Playwright green; user mode hides the flag/reason via the existing APP_MODE split.
+- **Two silent bugs caught in implementation** (both would have shipped): Gemini's list-shaped `resp.content` made the JSON unparseable — fail-open would have disabled the gate invisibly on every call; and PII survived in the persisted `run_start` event even with the column redacted. Details in spec §5b.
+- **Note for F3:** with the hatch OFF the agent already self-limits on blatant off-topic ("Som en specialiseret AI-assistent … kan jeg kun besvare spørgsmål om dansk skattelovgivning"), so the gate's measurable win on obvious cases is determinism + cost/latency (0.6 s, 0 agent tokens vs a full turn), not just refusal rate. Expect the judge delta to come from the adjacent band, not the easy cases.
+
+### F1-historical. Original task spec (Opus)
 **Kickoff prompt for the implementing session:** *"Read IMPROVEMENT_BACKLOG.md Phase F
 and whitepapers/guardrails_design.md (the approved spec), then implement F1: the
 classifier gate per spec §1, templates §3, decisions §6. Ground rules §0 apply — esp.

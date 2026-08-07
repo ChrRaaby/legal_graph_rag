@@ -7,7 +7,7 @@
 //         --platform=node --outfile=/tmp/replay.mjs && node /tmp/replay.mjs
 import {
   spansFromLog, runEndMs, captionAt, liveMaxMs,
-  costKr, reconstructContext,
+  costKr, reconstructContext, scopeGate,
 } from "../src/lib/events";
 import type { AgentEvent } from "../src/lib/events";
 import { buildCircuit, circuitOn } from "../src/lib/circuit";
@@ -119,6 +119,41 @@ check("costKr local is null", costKr("ollama", 10000, 1000) === null);
 const lastLlmIdx = log.map((e, i) => (e.type === "llm" ? i : -1)).filter((i) => i >= 0).at(-1)!;
 const ctx = reconstructContext(log, lastLlmIdx, "gs-025 spørgsmål");
 check("context has question + >=1 tool block", ctx.length >= 2 && ctx.some((b) => b.name.includes("output")));
+
+// ── F1 scope gate ────────────────────────────────────────────────────────────
+// A gated run is the degenerate log: run_start → scope_gate → answer → done,
+// with no llm/tool events at all. The layers must stay coherent on it.
+const gatedLog = [
+  { type: "run_start", run_id: "g1", provider: "gemini:gemini-3.5-flash",
+    question: "Fortæl mig en joke", ts: "2026-08-02T10:00:00Z" },
+  { type: "scope_gate", elapsed_s: 0.42, node: "scope_gate", flag: "non_tax",
+    reason: "Spørgsmålet handler om en joke og har intet med dansk skatteret at gøre.",
+    duration_s: 0.42 },
+  { type: "answer", text: "Det ligger uden for mit område — jeg svarer kun på spørgsmål om dansk skattelovgivning." },
+  { type: "done", run_id: "g1", latency_s: 0.51 },
+] as unknown as AgentEvent[];
+
+const gateOn = circuitOn(gatedLog, 500, circuit, null);
+check("gated run lights the shield node", gateOn.has("gate"));
+check("gated run lights user→gate edge", gateOn.has("u-g"));
+check("gated run does NOT light the agent", !gateOn.has("agent"));
+check("gated run lights no tool/db nodes",
+  !gateOn.has("db") && !gateOn.has("emb") && ![...gateOn].some((id) => id.startsWith("a-")));
+check("before the gate fires nothing is lit", circuitOn(gatedLog, 0, circuit, null).size === 0);
+
+check("gated run has no spans", spansFromLog(gatedLog).length === 0);
+check("gated run end comes from done", runEndMs(gatedLog) === 510);
+check("liveMaxMs counts the gate event", liveMaxMs(gatedLog) === 420);
+check("caption names the shield and the flag",
+  /Skjoldet/.test(captionAt(gatedLog, 500, false)) &&
+  /skatteområdet/i.test(captionAt(gatedLog, 500, false)),
+  captionAt(gatedLog, 500, false));
+
+const gateEv = scopeGate(gatedLog);
+check("scopeGate() finds the verdict", !!gateEv && gateEv.flag === "non_tax");
+check("scopeGate() is null on a normal run", scopeGate(log) === null);
+check("the shield exists in the idle circuit too",
+  circuit.nodes.some((n) => n.id === "gate" && n.cls === "gate"));
 
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

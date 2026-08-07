@@ -107,9 +107,13 @@ header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:4px 2px
 .nd.agent rect{stroke:var(--llm);stroke-width:1.6}
 .nd.tool rect{stroke:var(--tool)}
 .nd.db ellipse,.nd.db rect{stroke:var(--h-par)}
+/* F1 scope gate — warn-coloured so a block reads differently from activity */
+.nd.gate rect{stroke:var(--warn,#c9832b);stroke-dasharray:4 3}
 .nd.on{filter:drop-shadow(var(--glow) var(--accent))}
 .nd.on rect,.nd.on ellipse{stroke:var(--accent);stroke-width:2}
 .nd.on text{fill:var(--ink)}
+.nd.gate.on{filter:drop-shadow(var(--glow) var(--warn,#c9832b))}
+.nd.gate.on rect{stroke:var(--warn,#c9832b);stroke-width:2.2;stroke-dasharray:none}
 .edge{stroke:var(--line);stroke-width:1.4;fill:none;transition:stroke .3s}
 .edge.on{stroke:var(--accent);stroke-width:2;stroke-dasharray:7 5;animation:flow .5s linear infinite}
 @keyframes flow{to{stroke-dashoffset:-12}}
@@ -117,6 +121,10 @@ header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;padding:4px 2px
   .edge.on{animation:none}
   .caret,.thinking-line .dot{animation:none}
 }
+
+/* F1 scope-gate card in Tankestrømmen */
+.th.gateblock{border-left:3px solid var(--warn,#c9832b)}
+.th.gateblock .who{color:var(--warn,#c9832b)}
 
 /* placeholder tabs (E2/E3) */
 .placeholder{height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;text-align:center;color:var(--ink-3);padding:24px}

@@ -14,7 +14,7 @@ export interface CircuitNode {
   h: number;
   label: string;
   sub?: string;
-  cls: "" | "agent" | "tool" | "db";
+  cls: "" | "agent" | "tool" | "db" | "gate";
   cyl?: boolean;
 }
 export interface CircuitEdge {
@@ -47,6 +47,8 @@ export function buildCircuit(tools: ToolInfo[]): Circuit {
 
   const nodes: CircuitNode[] = [
     { id: "user", x: 64, y: H / 2, w: 86, h: 46, label: "Bruger", cls: "" },
+    // F1: the scope gate sits between user and agent — every prompt passes it.
+    { id: "gate", x: 157, y: H / 2, w: 74, h: 40, label: "Skjold", sub: "scope-gate", cls: "gate" },
     { id: "agent", x: 250, y: H / 2, w: 120, h: 60, label: "Agent", sub: "LangGraph · ReAct", cls: "agent" },
     { id: "db", x: 690, y: 150, w: 110, h: 66, label: "Neo4j Aura", sub: "vidensgraf", cls: "db", cyl: true },
     { id: "emb", x: 690, y: 300, w: 110, h: 44, label: "e5-large", sub: "embeddings", cls: "db" },
@@ -70,7 +72,8 @@ export function buildCircuit(tools: ToolInfo[]): Circuit {
   nodes.forEach((n) => (byId[n.id] = n));
 
   const edges: CircuitEdge[] = [
-    { id: "u-a", d: bez(rightMid(byId.user), leftMid(byId.agent)) },
+    { id: "u-g", d: bez(rightMid(byId.user), leftMid(byId.gate)) },
+    { id: "u-a", d: bez(rightMid(byId.gate), leftMid(byId.agent)) },
     ...rackIds.map((id) => ({ id: `a-${id}`, d: bez(rightMid(byId.agent), leftMid(byId[id])) })),
     { id: "t-db", d: bez([rackX + rackW / 2, H / 2], leftMid(byId.db)) },
     { id: "emb-db", d: `M${byId.emb.x},${byId.emb.y - byId.emb.h / 2} L${byId.db.x},${byId.db.y + byId.db.h / 2}` },
@@ -111,6 +114,17 @@ export function circuitOn(
     }
   }
 
+  // F1: a gated run stops at the shield — light user→gate and the gate itself,
+  // and nothing downstream, so the block is legible as "it never reached the
+  // agent". The gate event has no duration, so it stays lit for the rest of the
+  // (very short) run rather than flashing for one frame.
+  const gate = log.find((ev) => ev.type === "scope_gate");
+  if (gate && gate.type === "scope_gate" && tMs >= gate.elapsed_s * 1000) {
+    on.add("u-g");
+    on.add("gate");
+    return on;
+  }
+
   if (agentOn || activeToolNode) on.add("agent");
   if (activeToolNode) {
     on.add(activeToolNode);
@@ -120,6 +134,7 @@ export function circuitOn(
     on.add("emb");
     on.add("emb-db");
   } else if (agentOn) {
+    on.add("u-g");
     on.add("u-a");
   }
   return on;

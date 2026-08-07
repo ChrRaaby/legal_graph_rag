@@ -1,7 +1,7 @@
 import { useMemo, useState } from "react";
 import type { AgentEvent } from "../lib/api";
 import { postAnalyze } from "../lib/api";
-import { toolLabel, costKr, formatKr, reconstructContext, type ContextBlock } from "../lib/events";
+import { toolLabel, costKr, formatKr, reconstructContext, SCOPE_FLAG_LABELS, type ContextBlock } from "../lib/events";
 
 interface Props {
   log: AgentEvent[];
@@ -31,7 +31,13 @@ interface ToolCard {
   dur: number | null;
   count: number | null;
 }
-type Card = LlmCard | ToolCard;
+interface GateCard {
+  kind: "gate";
+  reveal: number;
+  flag: string;
+  reason: string;
+}
+type Card = LlmCard | ToolCard | GateCard;
 
 function previewStr(v: unknown): string {
   if (typeof v === "string") return v;
@@ -49,7 +55,11 @@ function buildCards(log: AgentEvent[]): Card[] {
   const cards: Card[] = [];
   const pendingCall: Record<string, AgentEvent[]> = {};
   log.forEach((ev, i) => {
-    if (ev.type === "llm") {
+    if (ev.type === "scope_gate") {
+      cards.push({
+        kind: "gate", reveal: ev.elapsed_s * 1000, flag: ev.flag, reason: ev.reason,
+      });
+    } else if (ev.type === "llm") {
       cards.push({
         kind: "llm", reveal: ev.start_s * 1000, logIndex: i, thinking: ev.thinking,
         inTok: ev.input_tokens, outTok: ev.output_tokens, dur: ev.duration_s, final: ev.is_final,
@@ -142,6 +152,24 @@ export default function Tankestrom({ log, t, live, question, provider, runId }: 
       {cards.map((c, idx) => {
         if (!visible(c.reveal)) return null;
         const step = idx + 1;
+        if (c.kind === "gate") {
+          return (
+            <div className="th gateblock" key={idx}>
+              <div className="th-head">
+                <span className="th-step">{step}</span>
+                <span className="who">🛡 Skjoldet · {SCOPE_FLAG_LABELS[c.flag] ?? c.flag}</span>
+              </div>
+              <div className="th-body">
+                <span>{c.reason || <em style={{ color: "var(--ink-3)" }}>(ingen begrundelse)</em>}</span>
+                <div className="meta">
+                  <span>blokeret før agenten</span>
+                  <span>0 værktøjskald</span>
+                  <span>flag: {c.flag}</span>
+                </div>
+              </div>
+            </div>
+          );
+        }
         if (c.kind === "llm") {
           const kr = costKr(provider, c.inTok, c.outTok);
           const blocks = reconstructContext(log, c.logIndex, question);

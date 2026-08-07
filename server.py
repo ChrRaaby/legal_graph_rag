@@ -53,7 +53,7 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 sys.path.insert(0, str(Path(__file__).parent))
 import app as agent_app  # noqa: E402  (triggers one import-time build_runtime)
-from app import build_runtime, stream_agent_answer, resolve_llm_provider  # noqa: E402
+from app import build_runtime, stream_agent_answer, resolve_llm_provider, redact_if_pii  # noqa: E402
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse  # noqa: E402
@@ -415,6 +415,17 @@ def _db() -> sqlite3.Connection:
 
 def _persist_run(run_id: str, question: str, answer: str, latency_s: float,
                  events: list[dict], citations: list[dict]) -> None:
+    # F1: a pii-gated prompt is never stored verbatim (spec §6.4). Applied here,
+    # at the single write choke point, so no caller can bypass it. The run_start
+    # event carries its own copy of the question, so the event log must be
+    # scrubbed too — redacting only the column would still persist the PII.
+    redacted = redact_if_pii(question, events)
+    if redacted != question:
+        events = [
+            {**ev, "question": redacted} if "question" in ev else ev
+            for ev in events
+        ]
+    question = redacted
     with _db_lock:
         con = _db()
         con.execute(
