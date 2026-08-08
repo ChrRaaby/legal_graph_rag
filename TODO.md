@@ -77,8 +77,11 @@ Deterministic half had already shown zero regression on never-gated items
 - ☑ User rulings 2026-08-08 applied: gs-064 → answer-with-stated-assumptions
   (now registers a real capability gap on both substrates — don't chase);
   gs-067 approved as judge facit.
-- ⏳ Reproducibility discriminating test (2× fresh OFF cells, zero classifier)
-  ran 2026-08-08 — result in spec §5f.
+- ☑ Reproducibility test resolved 2026-08-08: **classifier exonerated** (39 %
+  divergence with zero classifier involvement), but not uniform noise — a
+  fresh-model run reproduced a 10-hour-old cell at **95 %**; the back-to-back
+  second run dropped to 39 %. New traps-index rule: **unload/reload the model
+  between matched-pair cells; never run cells back-to-back.** Spec §5f.
 
 ---
 

@@ -220,7 +220,17 @@ User rulings applied first (they change the judge's facit): **gs-064 → answer-
 
 **Decision rule §2, first clause met (judge improves) → KEEP. Phase F's F1–F3 are complete.** Residual footnote: gs-067 failed the judge in *both* cells (non-flip, no delta impact) — the agent's strafbestemmelse answers judged incomplete against the approved facit; a candidate for a later look, not a gate issue.
 
-**Reproducibility discriminating test** (user-approved): two fresh OFF cells (guard off = zero classifier involvement) run back-to-back the same night, compared with each other — result recorded below when complete.
+**Reproducibility discriminating test — RESULT (2026-08-08, two OFF cells back-to-back, zero classifier involvement):**
+
+| comparison | byte-identical |
+|---|---|
+| off1 vs off2 (back-to-back, same day) | **27/69 (39 %)** |
+| off1 vs the 01:40 OFF cell (~10 h earlier, server idle between) | **66/69 (95 %)** |
+| off2 vs the 01:40 OFF cell | 27/69 (39 %) |
+
+**The classifier-sharing hypothesis is DEAD** — 39 % run-to-run divergence with the classifier entirely out of the loop. But the 95 % cell shows the cause is not uniform noise either: it is **server-state-dependent**. A run against a freshly loaded model reproduced a 10-hour-old cell almost perfectly (95 % — better than C2's 84 %); the run started immediately after a full 69-item pass diverged massively. Refined mechanism: **accumulated Ollama server state during a long run degrades determinism for the *next* run**, which also retro-explains the original ON-vs-OFF 47 % (the OFF cell ran after the ON cell had hammered the server all evening).
+
+**Operational rule for local matched pairs:** unload/reload the model (or let the server sit idle past keep-alive) between cells — do **not** run cells back-to-back — and in all cases judge diff-first rather than gating anything on byte-identity. det off1 34/69, off2 36/69: scores are stable even when bytes are not.
 
 ## 6. Settled decisions (user approved 2026-08-02)
 
