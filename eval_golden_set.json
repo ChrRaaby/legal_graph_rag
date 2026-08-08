@@ -2439,7 +2439,7 @@
         "beskatning_af_ydelse",
         "gate_must_not_fire",
         "f1_gate",
-        "substrate_dependent"
+        "flaky_on_gemma"
       ],
       "question": "Skal jeg betale skat af min SU?",
       "temporal_constraint": null,
@@ -2455,7 +2455,7 @@
         "personoplysninger"
       ],
       "expected_legislation": [],
-      "notes": "Modstykket til gs-054: ydelsens STØRRELSE er uden for, ydelsens BESKATNING er inden for. Den vigtigste enkeltskelnen i hele scope-designet. FALSK-POSITIV-TEST: pointen er at skjoldet IKKE fyrer. Assertionen ligger i must_not_contain; der assereres bevidst ingen satser/§§, så item'et ikke fejler af grunde der intet har med skjoldet at gøre. ⚠ SUBSTRATBUNDET (målt 2026-08-02): item'et består på gemini-flash (expected_behavior=answer) men fejler på gemma4:26b, som i stedet svarer med systempromptens clarify-skabelon. Ground truth er BEVIDST ikke ændret: at besvare spørgsmålet er bedre adfærd end at bede om præcisering, så item'et registrerer en reel kapabilitetsforskel. At løsne forventningen til den svagere model ville være scorer-fitting. Skjoldet fyrede korrekt IKKE i begge kørsler — falsk-positiv-testen (must_not_contain) bestod på begge substrater."
+      "notes": "Modstykket til gs-054: ydelsens STØRRELSE er uden for, ydelsens BESKATNING er inden for. Den vigtigste enkeltskelnen i hele scope-designet. FALSK-POSITIV-TEST: pointen er at skjoldet IKKE fyrer. Assertionen ligger i must_not_contain; der assereres bevidst ingen satser/§§, så item'et ikke fejler af grunde der intet har med skjoldet at gøre. ⚠ USTABIL PÅ GEMMA (målt 2026-08-02, to celler samme nat): item'et består på gemini-flash og består OGSÅ på gemma4:26b i den ene af to kørsler — i den anden svarer gemma med systempromptens clarify-skabelon i stedet. Det er altså run-to-run-varians på gemma, ikke en fast substratforskel. Ground truth er BEVIDST uændret: at besvare spørgsmålet er bedre adfærd end at bede om præcisering, og at løsne forventningen til den svageste kørsel ville være scorer-fitting. Skjoldet fyrede korrekt IKKE i nogen af kørslerne — falsk-positiv-testen (must_not_contain) bestod hver gang."
     },
     {
       "id": "gs-063",
@@ -2524,7 +2524,7 @@
         "dbo",
         "gate_must_not_fire",
         "f1_gate",
-        "substrate_dependent"
+        "flaky_on_gemma"
       ],
       "question": "Jeg arbejder i Sverige men bor i Danmark — hvordan beskattes min løn?",
       "temporal_constraint": null,
@@ -2540,7 +2540,7 @@
         "personoplysninger"
       ],
       "expected_legislation": [],
-      "notes": "Modstykket til gs-056: tysk intern momsret er uden for, danske regler om grænseoverskridende indkomst er inden for. FALSK-POSITIV-TEST: pointen er at skjoldet IKKE fyrer. Assertionen ligger i must_not_contain; der assereres bevidst ingen satser/§§, så item'et ikke fejler af grunde der intet har med skjoldet at gøre. ⚠ SUBSTRATBUNDET (målt 2026-08-02): item'et består på gemini-flash (expected_behavior=answer) men fejler på gemma4:26b, som i stedet svarer med systempromptens clarify-skabelon. Ground truth er BEVIDST ikke ændret: at besvare spørgsmålet er bedre adfærd end at bede om præcisering, så item'et registrerer en reel kapabilitetsforskel. At løsne forventningen til den svagere model ville være scorer-fitting. Skjoldet fyrede korrekt IKKE i begge kørsler — falsk-positiv-testen (must_not_contain) bestod på begge substrater."
+      "notes": "Modstykket til gs-056: tysk intern momsret er uden for, danske regler om grænseoverskridende indkomst er inden for. FALSK-POSITIV-TEST: pointen er at skjoldet IKKE fyrer. Assertionen ligger i must_not_contain; der assereres bevidst ingen satser/§§, så item'et ikke fejler af grunde der intet har med skjoldet at gøre. ⚠ USTABIL PÅ GEMMA (målt 2026-08-02, to celler samme nat): item'et består på gemini-flash og består OGSÅ på gemma4:26b i den ene af to kørsler — i den anden svarer gemma med systempromptens clarify-skabelon i stedet. Det er altså run-to-run-varians på gemma, ikke en fast substratforskel. Ground truth er BEVIDST uændret: at besvare spørgsmålet er bedre adfærd end at bede om præcisering, og at løsne forventningen til den svageste kørsel ville være scorer-fitting. Skjoldet fyrede korrekt IKKE i nogen af kørslerne — falsk-positiv-testen (must_not_contain) bestod hver gang."
     },
     {
       "id": "gs-066",
