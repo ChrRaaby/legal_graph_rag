@@ -421,6 +421,15 @@ Svar KUN i dette JSON-format (intet udenfor JSON):
     try:
         response = judge_llm.invoke(prompt)
         content = response.content if hasattr(response, "content") else str(response)
+        # gemini via langchain returns content as a LIST of blocks (measured
+        # 2026-08-08 on gemini-3.1-pro-preview; same shape F1 hit on flash-lite).
+        # Join the text blocks, skip thinking blocks — without this, re.search
+        # raises TypeError and every verdict silently becomes judge_pass=None.
+        if isinstance(content, list):
+            content = "\n".join(
+                b.get("text", "") for b in content
+                if isinstance(b, dict) and b.get("type") != "thinking"
+            )
         match = re.search(r"\{.*\}", content, re.DOTALL)
         if not match:
             return {"error": "no JSON in judge response", "judge_pass": None}

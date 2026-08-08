@@ -205,7 +205,22 @@ Cells: ON = `eval_results_f2_gemma_v42.jsonl`, OFF = `eval_results_f3_gemma_v42_
 
 **Verdict: provisional KEEP — not a completed L2 gate.** §2's flat-judge clause is satisfied on the deterministic evidence (judge-equivalent flat at +0 on untreated items, plus a determinism and latency win: 4.5 s vs 20.8 s, zero tool/graph cost, deterministic scope enforcement). **But the judge is the project's real metric and it did not run:** hosted credits are depleted, and a gemma judge grading gemma answers would violate the independence requirement. Both cells are saved; 44/69 answers differ, so diff-first judging is cheap. **Owed:** `JUDGE_MODEL=<pinned gemini id> ab_judge.py` over the saved cells when credits return. Do not mark F3 done until then.
 
-**Methodological note for future local runs.** Within-night reproducibility was **47 % (25/53 byte-identical)**, well below the 84 % the backlog measured for gemma in the C2 cells. A plausible mechanism: the ON cell shares one Ollama model between agent and classifier, so classifier calls interleave with agent calls and may perturb server-side state. Worth checking before treating local matched pairs as tight — and an argument for a separate small classifier model if VRAM ever allows.
+**Methodological note for future local runs.** Within-night reproducibility was **47 % (25/53 byte-identical)**, well below the 84 % the backlog measured for gemma in the C2 cells. A plausible mechanism: the ON cell shares one Ollama model between agent and classifier, so classifier calls interleave with agent calls and may perturb server-side state. Worth checking before treating local matched pairs as tight — and an argument for a separate small classifier model if VRAM ever allows. → Discriminating test run 2026-08-08, see §5f.
+
+## 5f. F3 CLOSED (2026-08-08, Fable) — judge pass done, verdict **KEEP**
+
+User rulings applied first (they change the judge's facit): **gs-064 → answer-with-stated-assumptions** (kommune is irrelevant for topskat; both flash and gemma currently clarify, so the item now registers a real capability gap — do not chase it with prompt-tuning) and **gs-067 approved as-is** (expected_answer incl. §-references is now expert-approved judge facit). The saved cells embed pre-ratification items, so judge-cell copies (`eval_results_f3_gemma_{on,off}.jsonl`) carry the ratified gs-064 definition patched in.
+
+**A judge-infrastructure bug was found and fixed before any verdict was accepted:** the first pass returned `judge_pass=None` on **all 88 calls** — `llm_judge` assumed string content, but gemini-3.1-pro-preview (via langchain) returns a **list of blocks**, so `re.search` raised TypeError and the catch-all silently nulled every verdict. Same bug class F1 caught in the classifier. Fixed in `eval_run.llm_judge` (list→text coercion, thinking blocks skipped); smoke-verified, then re-run: **0 judge errors**. ⚠ An earlier session might have accepted the first pass's "+0 delta" — 88 errors and +0 look identical in the summary line. Always check the error count.
+
+**Judge result (gemini-3.1-pro-preview, diff-first, footprint 44/69): ON 33/44 vs OFF 24/44 = +9** (10↑ 1↓, 0 errors). Decomposed:
+
+- **Treated items +6 — and NOT circular at the judge level.** The judge graded substance, not templates: it *passed* 6 of the 12 ungated self-limiting declines (gs-051/052/056/057/061/069 — the agent's own "specialiseret assistent"-decline accepted as satisfying expected behaviour). The 6 it failed are exactly the concrete misbehaviours the gate prevents: the Python script (gs-053), the dagpenge answer-attempt (gs-054), the empty answer (gs-055), and the three PII-solicitations (gs-058/059/060). This is the honest judge-measured value of the gate.
+- **Untreated items +3** (4↑ 1↓ on 28 differing never-gated items) — sampling/judge noise by construction; not treatment.
+
+**Decision rule §2, first clause met (judge improves) → KEEP. Phase F's F1–F3 are complete.** Residual footnote: gs-067 failed the judge in *both* cells (non-flip, no delta impact) — the agent's strafbestemmelse answers judged incomplete against the approved facit; a candidate for a later look, not a gate issue.
+
+**Reproducibility discriminating test** (user-approved): two fresh OFF cells (guard off = zero classifier involvement) run back-to-back the same night, compared with each other — result recorded below when complete.
 
 ## 6. Settled decisions (user approved 2026-08-02)
 

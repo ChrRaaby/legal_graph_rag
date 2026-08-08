@@ -60,22 +60,25 @@ NOT loosened (that would be scorer-fitting). Spec §5c–5d.
   API cost. Gemini remains the default.
 - ☐ **gs-039 rework** still open — separate item, asserts PBL § 16 values,
   needs your legal review.
-### F3. Measured matched pair ⏳ — **deterministic half DONE 2026-08-02; judge pass owed**
-ON/OFF cells run on gemma4:26b same night. **Q1 (the real question): zero
-regression — 28/53 vs 28/53 on never-gated items, delta +0, flips 4↑/4↓ = noise.**
-Ungated behaviour: agent self-limits on most off-topic, but **wrote the Python
-script (gs-053)**, **returned an empty answer (gs-055)**, and on all three PII
-prompts asked the user for *more* personal data. PII-echo hypothesis NOT
-confirmed — no verbatim leak. ⚠ Treated-item score (16/16 vs 5/16) is
-**circular** — ground truth is the gate's own template; do not quote it.
-**Verdict: provisional KEEP, not a completed L2 gate.** Spec §5e.
-- ☐ **Judge pass owed** — blocked on Gemini credits (a gemma judge on gemma
-  answers breaks independence). Cells saved, 44/69 answers differ → diff-first
-  is cheap: `JUDGE_MODEL=<pinned gemini id> ab_judge.py` over the saved cells.
-- ☐ **Local-run determinism**: within-night reproducibility was 47 %, vs 84 %
-  measured in the C2 gemma cells. Hypothesis: sharing one Ollama model between
-  agent and classifier perturbs server state. Check before trusting tight local
-  matched pairs.
+- ☑ **Fable-review flags RESOLVED by user 2026-08-08**: gs-064 ratified as
+  answer-with-stated-assumptions (kommune irrelevant for topskat); gs-067
+  approved as-is incl. the legal content in expected_answer. Both applied to
+  the golden set before the judge pass.
+### F3. Measured matched pair ☑ DONE 2026-08-08 — **KEEP: judge +9 (treated +6 real, untreated +3 noise), 0 errors**
+Judge pass ran after credits top-up (gemini-3.1-pro-preview, diff-first,
+footprint 44/69): **ON 33 vs OFF 24.** The treated +6 is genuine — the judge
+passed 6/12 ungated self-limiting declines on substance and failed exactly the
+concrete misbehaviours (Python script, empty answer, 3× PII-solicitation).
+Deterministic half had already shown zero regression on never-gated items
+(28/53 both cells). **Phase F F1–F3 complete.** Spec §5e–5f.
+- Judge-infra bug fixed en route: gemini list-shaped content nulled all 88
+  verdicts on the first pass ("+0, 88 errors" reads like clean-flat). Now in
+  the traps index: **never read a judge delta without checking errors == 0.**
+- ☑ User rulings 2026-08-08 applied: gs-064 → answer-with-stated-assumptions
+  (now registers a real capability gap on both substrates — don't chase);
+  gs-067 approved as judge facit.
+- ⏳ Reproducibility discriminating test (2× fresh OFF cells, zero classifier)
+  ran 2026-08-08 — result in spec §5f.
 
 ---
 

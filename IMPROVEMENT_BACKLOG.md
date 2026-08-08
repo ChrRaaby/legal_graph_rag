@@ -289,6 +289,14 @@ current look is acceptable (labels stay readable via the paint-order halo).
 
 **Phase B is absorbed:** do NOT build B2–B7 in Streamlit; B1 (APP_MODE) survives as a backend concept (see the doc's "Relationship to Phase B" for the interim-deploy decision rule).
 
+### E4. Eval lens v2 — golden-set browser + smoke runner ☐ READY FOR OPUS (user request 2026-08-02; scoped in TODO.md E4 section — read it first)
+**Kickoff prompt for the implementing session:** *"Read IMPROVEMENT_BACKLOG.md Phase E (E4) and the E4 section of TODO.md, then implement E4: golden-set browser endpoint + UI, smoke-tier runner, pillar/tags matrix dimensions, event-log storage for UI runs. Ground rules §0 apply. A1 (scorer single-sourcing) lands as part of this — kill app.py's stale scorer copy."*
+**Post-Phase-F additions to the TODO.md scope (2026-08-08):**
+1. The golden set is now **v4.2, 69 items**, with three new facts the lens must handle: behaviours `out_of_scope`/`pii_block`, category `scope`, and `f1_gate`/`gate_must_not_fire`/`flaky_on_gemma` tags (tag-filtering in the browser is now genuinely useful).
+2. **Surface gate verdicts in eval views**: a gated run's record has answer == a `SCOPE_TEMPLATES` text; the tool-health/eval tables should mark those rows (cheap: template equality — do NOT try to read tool_events from eval jsonl, they aren't there; traps index).
+3. `eval_scope_fixtures.py` output (`eval_fixtures_scope_baseline.jsonl`) is a third results shape the Eval lens could list; optional, low priority. If touched: stamp the classifier model into its records first (E0 lesson — currently unstamped).
+4. Verify like E1–E3: replay assertions + Playwright + real-data eyeball.
+
 ## Phase F — Guardrails classifier gate (design APPROVED 2026-08-02; F1 ready for Opus)
 
 **Spec: `whitepapers/guardrails_design.md` (v2)** — user-chosen architecture: one
@@ -335,7 +343,13 @@ rule 4 (2-tuple), rule 5 (app.py single source), rule 8 (never print .env)."*
 - ☑ **Re-verified end-to-end on local gemma4:26b** (2026-08-02 night, hosted credits still depleted). Required one addition: `SCOPE_CLASSIFIER_MODEL=ollama:<model>` for a local classifier backend (Gemini default unchanged; validated **69/69 on the L0 fixture**, same bar as flash-lite → the guardrail now runs at zero API cost). Full v4.2 run, guard ON: **gate fired 12/12 byte-exact, zero false positives 7/7, gated 4.5 s vs agent 20.8 s (4.6×), new items 17/19, legacy 27/50.** All three earlier corrections hold on gemma too. The 2 residual failures (gs-062/gs-065) are **substrate-dependent** — pass on flash, gemma returns the clarify template — and ground truth was deliberately NOT loosened (scorer-fitting); both tagged `substrate_dependent`. Legacy-50 is NOT comparable to C-season cells (set version + cross-week drift). Detail: spec §5d.
 - **New trap for the index:** eval result records do **not** persist `tool_events` (E3 known gap), so "did the gate fire?" cannot be answered from `eval_results_*.jsonl` — verify by byte-exact answer/template equality instead. An analysis that counted `tool_events` reported 0 tools for every item, including ones the console showed making 14 calls.
 - gs-039 rework still open (asserts PBL § 16 values → user legal-review gate).
-### F3. L2 matched pair ⏳ 2026-08-02 (Opus) — deterministic half done, **judge pass owed; do NOT mark done**
+### F3. L2 matched pair ☑ DONE 2026-08-08 (Opus det-half, Fable judge+verdict) — **KEEP: judge +9 (treated +6 real, untreated +3 noise), 0 errors**
+- **Judge (gemini-3.1-pro-preview, diff-first, footprint 44/69): ON 33 vs OFF 24 = +9.** The treated +6 is genuine, not circular: the judge passed 6/12 ungated self-limiting declines on substance and failed exactly the concrete misbehaviours (Python script, empty answer, 3× PII-solicitation, dagpenge attempt). Untreated +3 = noise (never-gated). §2 first clause met → KEEP. Details spec §5f.
+- **User rulings applied before judging** (they set the facit): gs-064 → answer-with-stated-assumptions (fails on both substrates today = real capability gap, don't chase); gs-067 approved as-is.
+- **Judge-infra bug fixed en route:** gemini list-shaped content silently nulled ALL 88 verdicts on the first pass (error count 88, delta "+0" — looks identical to a clean flat result in the summary line). `llm_judge` now coerces list→text. **Always check judge error count before reading a delta.**
+- Reproducibility discriminating test (2× fresh OFF cells same night, zero classifier) run 2026-08-08 — result in spec §5f.
+
+### F3-historical (Opus 2026-08-02 deterministic half)
 - Cells (gemma4:26b, same night, separate processes): ON `eval_results_f2_gemma_v42.jsonl`, OFF `eval_results_f3_gemma_v42_off.jsonl`.
 - **Q1 zero regression on the 53 never-gated items: 28/53 both cells, delta +0, 8 flips split 4↑/4↓.** This is the result F3 exists to establish.
 - ⚠ **The treated-item delta (16/16 vs 5/16) is CIRCULAR** — the 12 new blocked items' ground truth *is* the gate template, so OFF cannot win them. Never quote it as the guard's benefit.
@@ -367,3 +381,5 @@ rule 4 (2-tuple), rule 5 (app.py single source), rule 8 (never print .env)."*
 - Long-running eval drivers: python block-buffers stdout to a file → a log-grep staging check sees nothing and kills healthy runs. Set `PYTHONUNBUFFERED=1` in the driver env.
 - torch-importing processes intermittently segfault at startup in WSL2 (worse after long uptime — 2026-07-08 also saw interpreter-level corruption via the pygments import chain). Wrap heavy runs in a retry loop; never start two torch processes concurrently; `wsl --shutdown` clears a degraded VM.
 - The Claude Code harness does not preserve the shell working directory between calls — use absolute paths in background/long-running commands (a relative `.venv/bin/python3` intermittently resolves to nothing).
+- **Gemini via langchain returns `content` as a LIST of blocks, not a string** (measured on flash-lite AND 3.1-pro-preview). Any code doing `re.search`/`json.loads` on `response.content` raises TypeError, and a catch-all turns that into a silent None. Burned twice in one week: the F1 classifier (fail-open would have disabled the gate invisibly) and the F3 judge (**all 88 verdicts nulled, summary printed "+0 delta, 88 errors"** — reads like a clean flat result if you don't check the error count). Coerce list→text first; **never accept a judge delta without checking judge-errors == 0.**
+- Eval result records do NOT persist `tool_events` (E3 gap) — "did the gate fire?" must be verified by byte-exact answer/template equality, not by counting tool calls in `eval_results_*.jsonl`.
