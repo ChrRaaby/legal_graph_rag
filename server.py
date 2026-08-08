@@ -700,7 +700,34 @@ def _infer_set(name: str, sample: dict) -> str:
     return "v" + m.group(1) if m else "—"
 
 
-_DIMS = [("category", "category"), ("difficulty", "difficulty"), ("expected_behavior", "behavior")]
+# E4: pillar and tags joined category/difficulty/behavior. `tags` is list-valued,
+# so a record contributes to every tag it carries (totals per tag row, not per
+# record) — that is what makes "how do the f1_gate items do?" answerable.
+_DIMS = [
+    ("category", "category"),
+    ("difficulty", "difficulty"),
+    ("expected_behavior", "behavior"),
+    ("pillar", "pillar"),
+]
+_LIST_DIMS = [("tags", "tags")]
+
+GOLDEN_PATH = Path(__file__).parent / "eval_golden_set.json"
+
+
+def _load_golden() -> dict:
+    return json.loads(GOLDEN_PATH.read_text(encoding="utf-8"))
+
+
+def _gate_templates() -> dict[str, str]:
+    """{template text -> flag}. A gated run's answer IS one of these verbatim, so
+    template equality is how eval views detect gating — eval records do NOT carry
+    tool_events (E3 gap, traps index), so counting tool_calls would report zero
+    for every row."""
+    return {v.strip(): k for k, v in agent_app.SCOPE_TEMPLATES.items()}
+
+
+def _gate_flag(answer: str) -> str | None:
+    return _gate_templates().get((answer or "").strip())
 
 
 def _scan_eval_file(path: Path) -> dict | None:
@@ -738,6 +765,20 @@ def _scan_eval_file(path: Path) -> dict | None:
             if r["scores"].get("overall_pass"):
                 a[0] += 1
         dims[label] = [{"value": v, "pass": a[0], "total": a[1]} for v, a in sorted(agg.items())]
+    for field, label in _LIST_DIMS:
+        agg = {}
+        for r in records:
+            for v in (r["item"].get(field) or []):
+                a = agg.setdefault(str(v), [0, 0])
+                a[1] += 1
+                if r["scores"].get("overall_pass"):
+                    a[0] += 1
+        # tags are long-tailed; surface the ones with enough mass to read
+        dims[label] = [{"value": v, "pass": a[0], "total": a[1]}
+                       for v, a in sorted(agg.items(), key=lambda kv: (-kv[1][1], kv[0]))
+                       if a[1] >= 2]
+
+    gated = sum(1 for r in records if _gate_flag(r.get("answer", "")))
 
     ts = first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
     return {
@@ -752,6 +793,7 @@ def _scan_eval_file(path: Path) -> dict | None:
         "mean_pass": round(passes / runs, 1) if runs else 0,
         "pass_pct": round(100 * passes / len(records)) if records else 0,
         "dims": dims,
+        "gated": gated,          # records answered by the F1 scope gate
     }
 
 
@@ -798,6 +840,7 @@ def eval_run_items(name: str):
         if r["scores"].get("overall_pass"):
             e["passes"] += 1
         e["answer"] = r.get("answer", "")
+        e["gate_flag"] = _gate_flag(r.get("answer", ""))   # E4: mark gated rows
         sc = r["scores"]
         e["scores"] = {
             "must_contain": sc.get("must_contain_pass"), "must_not_contain": sc.get("must_not_contain_pass"),
@@ -806,6 +849,183 @@ def eval_run_items(name: str):
         }
     items = sorted(by_item.values(), key=lambda x: x["id"])
     return JSONResponse({"name": name, "items": items})
+
+
+# ── E4: golden-set browser ────────────────────────────────────────────────────
+
+@app.get("/api/eval/golden")
+def eval_golden(q: str = "", dim: str = "", value: str = ""):
+    """Serve the golden-set item definitions themselves (read-only).
+
+    The Eval lens previously only ever saw items echoed from *result* files, so
+    an item that had never been run was invisible. Optional filters: `q` is a
+    free-text search over id/question/expected_answer/notes; `dim`+`value` filter
+    on any scalar field or on `tags` (list-valued)."""
+    try:
+        gs = _load_golden()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"cannot read golden set: {exc}"}, status_code=500)
+    items = gs.get("items", [])
+
+    if dim and value:
+        if dim == "tags":
+            items = [i for i in items if value in (i.get("tags") or [])]
+        else:
+            items = [i for i in items if str(i.get(dim) or "") == value]
+    if q:
+        ql = q.lower()
+        items = [i for i in items if ql in json.dumps(
+            {k: i.get(k) for k in ("id", "question", "expected_answer", "notes", "tags")},
+            ensure_ascii=False).lower()]
+
+    def facet(field: str) -> list[dict]:
+        agg: dict[str, int] = {}
+        for i in gs.get("items", []):
+            agg[str(i.get(field) or "—")] = agg.get(str(i.get(field) or "—"), 0) + 1
+        return [{"value": v, "count": c} for v, c in sorted(agg.items())]
+
+    tag_agg: dict[str, int] = {}
+    for i in gs.get("items", []):
+        for t in (i.get("tags") or []):
+            tag_agg[str(t)] = tag_agg.get(str(t), 0) + 1
+
+    return JSONResponse({
+        "metadata": gs.get("metadata", {}),
+        "total": len(gs.get("items", [])),
+        "shown": len(items),
+        "facets": {
+            "category": facet("category"),
+            "difficulty": facet("difficulty"),
+            "expected_behavior": facet("expected_behavior"),
+            "pillar": facet("pillar"),
+            "tags": [{"value": v, "count": c}
+                     for v, c in sorted(tag_agg.items(), key=lambda kv: (-kv[1], kv[0]))],
+        },
+        "items": items,
+    })
+
+
+# ── E4: smoke-tier runner ─────────────────────────────────────────────────────
+# Deliberately NOT a replacement for the §2 measurement protocol. Full matched
+# pairs stay on the CLI (ab_driver.py); this exists so a developer can run one
+# item and watch it, and it is capped so a casual full-set run is never one
+# click away. Every run costs real API money or GPU time.
+
+EVAL_RUN_MAX_ITEMS = int(os.getenv("EVAL_RUN_MAX_ITEMS", "5"))
+
+
+@app.post("/api/eval/run")
+async def eval_run_smoke(request: Request):
+    """Run 1..EVAL_RUN_MAX_ITEMS golden items through the real agent, streaming
+    the same SSE event shape as /api/ask so the run is scrubbable in Kredsløbet,
+    then score each with the single-sourced scorer (A1) and persist the event log
+    to mr_runs — which is what makes an eval item's trace replayable (E3's
+    deferred gap, now closed for UI-triggered runs)."""
+    body = await request.json()
+    ids = [str(i).strip() for i in (body.get("item_ids") or []) if str(i).strip()]
+    if not ids:
+        return JSONResponse({"error": "Provide item_ids: [...]"}, status_code=400)
+    if len(ids) > EVAL_RUN_MAX_ITEMS:
+        return JSONResponse(
+            {"error": f"Smoke tier is capped at {EVAL_RUN_MAX_ITEMS} items "
+                      f"({len(ids)} requested). Full runs belong on the CLI "
+                      f"(eval_run.py / ab_driver.py) — see backlog §2."},
+            status_code=400)
+    try:
+        gs = _load_golden()
+    except Exception as exc:  # noqa: BLE001
+        return JSONResponse({"error": f"cannot read golden set: {exc}"}, status_code=500)
+    by_id = {i["id"]: i for i in gs.get("items", [])}
+    missing = [i for i in ids if i not in by_id]
+    if missing:
+        return JSONResponse({"error": f"unknown item ids: {missing}"}, status_code=400)
+
+    items = [by_id[i] for i in ids]
+    return StreamingResponse(_eval_run_events(items), media_type="text/event-stream",
+                             headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+def _eval_run_events(items: list[dict]):
+    """SSE generator for a smoke run: per item, the normal agent event stream
+    (so the UI can light Kredsløbet), then an `eval_item` verdict event."""
+    for n, item in enumerate(items, 1):
+        yield _sse({"type": "eval_item_start", "index": n, "total": len(items),
+                    "id": item["id"], "question": item["question"],
+                    "expected_behavior": item.get("expected_behavior")})
+        q: queue.Queue = queue.Queue()
+        t0 = time.perf_counter()
+        run_id = uuid.uuid4().hex[:12]
+        client_events: list[dict] = []
+        state: dict = {}
+
+        def _worker(_item=item, _q=q, _state=state):
+            try:
+                sent = 0
+
+                def _on_event(tool_events: list[dict]):
+                    nonlocal sent
+                    for ev in tool_events[sent:]:
+                        _q.put(("event", ev))
+                    sent = len(tool_events)
+
+                answer, tool_events = stream_agent_answer(
+                    AGENT_EXECUTOR, [{"role": "user", "content": _item["question"]}],
+                    on_tool_event=_on_event)
+                for ev in tool_events[sent:]:
+                    _q.put(("event", ev))
+                _state["answer"] = answer
+                _state["tool_events"] = tool_events
+                _q.put(("done", None))
+            except Exception as exc:  # noqa: BLE001
+                _state["answer"] = f"[ERROR: {exc}]"
+                _state["tool_events"] = []
+                _q.put(("error", str(exc)))
+                _q.put(("done", None))
+
+        threading.Thread(target=_worker, daemon=True).start()
+        start_ev = {"type": "run_start", "run_id": run_id, "provider": PROVIDER,
+                    "question": item["question"],
+                    "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())}
+        client_events.append(start_ev)
+        yield _sse(start_ev)
+
+        while True:
+            kind, payload = q.get()
+            if kind == "event":
+                ev = _client_event(payload)
+                client_events.append(ev)
+                yield _sse(ev)
+            elif kind == "error":
+                yield _sse({"type": "error", "message": payload})
+            elif kind == "done":
+                break
+
+        answer = state.get("answer", "")
+        tool_events = state.get("tool_events", [])
+        latency = round(time.perf_counter() - t0, 3)
+        # A1: the same scorer eval_run.py uses — no second implementation.
+        scores = agent_app.score_item(item, answer, tool_events)
+
+        ans_ev = {"type": "answer", "text": answer}
+        client_events.append(ans_ev)
+        yield _sse(ans_ev)
+        done_ev = {"type": "done", "run_id": run_id, "latency_s": latency}
+        client_events.append(done_ev)
+        yield _sse(done_ev)
+
+        # Persist so the item's trace is replayable like any chat turn (E3 gap).
+        try:
+            _persist_run(run_id, item["question"], answer, latency, client_events,
+                         resolve_citations(answer))
+        except Exception as exc:  # noqa: BLE001
+            print(f"  eval run persist failed: {exc}", flush=True)
+
+        yield _sse({"type": "eval_item", "index": n, "total": len(items),
+                    "id": item["id"], "run_id": run_id, "latency_s": latency,
+                    "answer": answer, "scores": scores,
+                    "gate_flag": _gate_flag(answer)})
+
+    yield _sse({"type": "eval_done", "total": len(items)})
 
 
 @app.get("/api/tools/health")

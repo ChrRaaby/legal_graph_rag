@@ -76,7 +76,16 @@ export interface EvalRun {
   n_records: number;
   mean_pass: number;
   pass_pct: number;
-  dims: { category: EvalDimRow[]; difficulty: EvalDimRow[]; behavior: EvalDimRow[] };
+  // E4 added pillar + tags; tags is list-valued so its rows count item-tag
+  // pairs, not records.
+  dims: {
+    category: EvalDimRow[];
+    difficulty: EvalDimRow[];
+    behavior: EvalDimRow[];
+    pillar?: EvalDimRow[];
+    tags?: EvalDimRow[];
+  };
+  gated?: number; // records answered by the F1 scope gate
 }
 export interface EvalItem {
   id: string;
@@ -87,12 +96,60 @@ export interface EvalItem {
   runs: number;
   passes: number;
   answer: string;
+  gate_flag?: string | null; // "pii" | "illegal" | "non_tax" when gate-answered
   scores: {
     must_contain: boolean;
     must_not_contain: boolean;
     behavior: boolean;
     citation: boolean;
     detected_behavior: string;
+  };
+}
+
+// ── E4: golden-set browser + smoke runner ────────────────────────────────────
+export interface GoldenItem {
+  id: string;
+  category: string;
+  difficulty: string;
+  pillar: string;
+  tags: string[];
+  question: string;
+  expected_behavior: string;
+  expected_answer: string;
+  must_contain: (string | string[])[];
+  must_not_contain: (string | string[])[];
+  expected_legislation: { lov?: string; paragraf?: string | string[] }[];
+  expected_reasoning_steps?: string[];
+  temporal_constraint?: string | null;
+  notes?: string;
+}
+export interface GoldenFacet {
+  value: string;
+  count: number;
+}
+export interface GoldenSet {
+  metadata: { name?: string; version?: string; description?: string };
+  total: number;
+  shown: number;
+  facets: Record<string, GoldenFacet[]>;
+  items: GoldenItem[];
+}
+export interface EvalRunVerdict {
+  id: string;
+  run_id: string;
+  latency_s: number;
+  answer: string;
+  gate_flag: string | null;
+  scores: {
+    overall_pass: boolean;
+    must_contain_pass: boolean;
+    must_not_contain_pass: boolean;
+    behavior_match: boolean;
+    citation_pass: boolean;
+    detected_behavior: string;
+    must_contain_details?: Record<string, boolean>;
+    must_not_contain_details?: Record<string, boolean>;
+    tool_call_count?: number;
   };
 }
 export interface ToolHealthRow {
@@ -189,6 +246,67 @@ export async function postAnalyze(runId: string, question: string, context: stri
   const data = await res.json();
   if (data.error) throw new Error(data.error);
   return data.answer as string;
+}
+
+export async function fetchGolden(params: { q?: string; dim?: string; value?: string } = {}): Promise<GoldenSet> {
+  const qs = new URLSearchParams();
+  if (params.q) qs.set("q", params.q);
+  if (params.dim && params.value) {
+    qs.set("dim", params.dim);
+    qs.set("value", params.value);
+  }
+  const res = await fetch(`/api/eval/golden${qs.toString() ? "?" + qs : ""}`);
+  if (!res.ok) throw new Error(`eval/golden ${res.status}`);
+  return (await res.json()) as GoldenSet;
+}
+
+/** Smoke-tier eval run. Streams the same events as /api/ask (so Kredsløbet
+ *  lights up per item) plus eval_item_start / eval_item / eval_done. */
+export async function streamEvalRun(
+  itemIds: string[],
+  onEvent: (ev: AgentEvent | Record<string, unknown>) => void,
+  signal?: AbortSignal,
+): Promise<void> {
+  const res = await fetch("/api/eval/run", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ item_ids: itemIds }),
+    signal,
+  });
+  if (!res.ok) {
+    const msg = await res.json().catch(() => ({}));
+    throw new Error((msg as { error?: string }).error ?? `eval/run ${res.status}`);
+  }
+  if (!res.body) throw new Error("eval/run: no body");
+  await pumpSse(res.body.getReader(), onEvent);
+}
+
+async function pumpSse(
+  reader: ReadableStreamDefaultReader<Uint8Array>,
+  onEvent: (ev: never) => void,
+): Promise<void> {
+  const decoder = new TextDecoder();
+  let buffer = "";
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    buffer += decoder.decode(value, { stream: true });
+    let sep: number;
+    while ((sep = buffer.indexOf("\n\n")) !== -1) {
+      const chunk = buffer.slice(0, sep);
+      buffer = buffer.slice(sep + 2);
+      for (const line of chunk.split("\n")) {
+        if (!line.startsWith("data:")) continue;
+        const json = line.slice(5).trim();
+        if (!json) continue;
+        try {
+          onEvent(JSON.parse(json) as never);
+        } catch {
+          // ignore a malformed frame rather than kill the stream
+        }
+      }
+    }
+  }
 }
 
 /** POST a conversation and invoke `onEvent` for each SSE event as it arrives. */

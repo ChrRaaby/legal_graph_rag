@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from "react";
 import {
-  fetchEvalRuns, fetchEvalItems, fetchToolHealth,
+  fetchEvalRuns, fetchEvalItems, fetchToolHealth, fetchGolden, streamEvalRun,
   type EvalRun, type EvalItem, type ToolHealthRow,
+  type GoldenSet, type GoldenItem, type EvalRunVerdict,
 } from "../lib/api";
+import { SCOPE_FLAG_LABELS } from "../lib/events";
 
 const pct = (r: { pass: number; total: number }) => (r.total ? Math.round((100 * r.pass) / r.total) : 0);
 const shortDate = (ts: string) => (ts || "").slice(0, 10);
@@ -11,26 +13,32 @@ function runLabel(r: EvalRun): string {
   return `${r.model} · ${r.set_version} · ${r.repeat}× · ${r.mean_pass}/${r.n_items} · ${shortDate(r.ts)}`;
 }
 
+type DimField = "category" | "difficulty" | "behavior" | "pillar" | "tags";
+
 /** Dimension matrix: rows = dimension values, one pass-% cell per selected run. */
-function DimTable({ title, field, primary, compare }: {
+function DimTable({ title, field, primary, compare, note }: {
   title: string;
-  field: "category" | "difficulty" | "behavior";
+  field: DimField;
   primary: EvalRun;
   compare: EvalRun | null;
+  note?: string;
 }) {
+  const rowsOf = (run: EvalRun | null) => (run?.dims?.[field] ?? []);
   const values = useMemo(() => {
     const set = new Set<string>();
-    primary.dims[field].forEach((r) => set.add(r.value));
-    compare?.dims[field].forEach((r) => set.add(r.value));
+    rowsOf(primary).forEach((r) => set.add(r.value));
+    rowsOf(compare).forEach((r) => set.add(r.value));
     return [...set].sort();
   }, [primary, compare, field]);
   const cell = (run: EvalRun | null, v: string) => {
-    const row = run?.dims[field].find((r) => r.value === v);
+    const row = rowsOf(run).find((r) => r.value === v);
     return row ? `${pct(row)}%` : "—";
   };
+  if (values.length === 0) return null;
   return (
     <div className="dimtable">
       <h5>{title}</h5>
+      {note && <div className="note">{note}</div>}
       <div style={{ overflowX: "auto" }}>
         <table className="etbl">
           <thead>
@@ -43,7 +51,7 @@ function DimTable({ title, field, primary, compare }: {
           </thead>
           <tbody>
             {values.map((v) => {
-              const prow = primary.dims[field].find((r) => r.value === v);
+              const prow = rowsOf(primary).find((r) => r.value === v);
               const worst = prow && pct(prow) < 50;
               return (
                 <tr key={v} className={worst ? "worst" : ""}>
@@ -81,7 +89,12 @@ function ItemsTable({ name }: { name: string }) {
           return (
             <>
               <tr key={it.id} className={`item-row ${cls}`} onClick={() => setOpen(open === it.id ? null : it.id)}>
-                <td>{it.id}</td>
+                <td>
+                  {it.id}
+                  {it.gate_flag && (
+                    <span className="gatebadge sm" title={`Besvaret af skjoldet (${it.gate_flag}) — ingen agent, ingen værktøjer`}>🛡</span>
+                  )}
+                </td>
                 <td>{it.category}</td>
                 <td>{it.expected_behavior}</td>
                 <td className="num">{it.passes}/{it.runs}</td>
@@ -97,6 +110,11 @@ function ItemsTable({ name }: { name: string }) {
                         </span>
                       ))}
                       <span className="det">detected: {it.scores.detected_behavior}</span>
+                      {it.gate_flag && (
+                        <span className="gatebadge">
+                          🛡 {SCOPE_FLAG_LABELS[it.gate_flag] ?? it.gate_flag} — besvaret af skjoldet
+                        </span>
+                      )}
                     </div>
                     <details><summary>Sidste svar</summary><pre>{it.answer || "(intet)"}</pre></details>
                   </td>
@@ -107,6 +125,183 @@ function ItemsTable({ name }: { name: string }) {
         })}
       </tbody>
     </table>
+  );
+}
+
+// ── E4: golden-set browser ───────────────────────────────────────────────────
+// The lens used to show only items that appeared in a *result* file, so an item
+// that had never been run was invisible. This reads the set itself.
+
+const FILTER_DIMS: { key: string; label: string }[] = [
+  { key: "category", label: "Kategori" },
+  { key: "expected_behavior", label: "Adfærd" },
+  { key: "pillar", label: "Søjle" },
+  { key: "difficulty", label: "Sværhedsgrad" },
+  { key: "tags", label: "Tag" },
+];
+
+function termList(terms: (string | string[])[]): string {
+  if (!terms || terms.length === 0) return "—";
+  return terms.map((t) => (Array.isArray(t) ? t.join(" | ") : t)).join(" · ");
+}
+
+function GoldenBrowser({ onRun, running }: {
+  onRun: (ids: string[]) => void;
+  running: boolean;
+}) {
+  const [data, setData] = useState<GoldenSet | null>(null);
+  const [q, setQ] = useState("");
+  const [dim, setDim] = useState("");
+  const [value, setValue] = useState("");
+  const [open, setOpen] = useState<string | null>(null);
+  const [picked, setPicked] = useState<string[]>([]);
+  const [err, setErr] = useState<string | null>(null);
+
+  useEffect(() => {
+    const id = setTimeout(() => {
+      fetchGolden({ q, dim, value }).then(setData).catch((e) => setErr(String(e)));
+    }, 200);
+    return () => clearTimeout(id);
+  }, [q, dim, value]);
+
+  const toggle = (id: string) =>
+    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+
+  if (err) return <div className="dimtable"><h5>Golden set</h5><div className="note">Kunne ikke hente: {err}</div></div>;
+  if (!data) return <div className="dimtable"><h5>Golden set</h5><div className="eval-loading">Indlæser …</div></div>;
+
+  const facetValues = dim ? (data.facets[dim] ?? []) : [];
+  const capped = picked.length >= 5;
+
+  return (
+    <div className="dimtable golden">
+      <h5>Golden set · {data.metadata.version} · {data.shown}/{data.total} items</h5>
+      <div className="golden-filters">
+        <input
+          value={q}
+          onChange={(e) => setQ(e.target.value)}
+          placeholder="Søg i spørgsmål, facit, noter, tags …"
+          aria-label="Søg i golden set"
+        />
+        <select value={dim} onChange={(e) => { setDim(e.target.value); setValue(""); }} aria-label="Dimension">
+          <option value="">— filtrér på —</option>
+          {FILTER_DIMS.map((d) => <option key={d.key} value={d.key}>{d.label}</option>)}
+        </select>
+        {dim && (
+          <select value={value} onChange={(e) => setValue(e.target.value)} aria-label="Værdi">
+            <option value="">— vælg —</option>
+            {facetValues.map((f) => (
+              <option key={f.value} value={f.value}>{f.value} ({f.count})</option>
+            ))}
+          </select>
+        )}
+        {(q || value) && <button className="ghost" onClick={() => { setQ(""); setDim(""); setValue(""); }}>Ryd</button>}
+      </div>
+
+      <div className="golden-runbar">
+        <span className={capped ? "cap" : ""}>{picked.length} valgt {capped && "· max 5"}</span>
+        <button
+          className="run"
+          disabled={picked.length === 0 || running}
+          onClick={() => onRun(picked)}
+        >
+          {running ? "Kører …" : `Kør ${picked.length || ""} smoke`}
+        </button>
+        {picked.length > 0 && <button className="ghost" onClick={() => setPicked([])}>Nulstil valg</button>}
+      </div>
+      <div className="note">
+        Smoke-tier: 1–5 items, koster rigtige API-kald. Fulde matched pairs hører til på CLI
+        (<code>eval_run.py</code> / <code>ab_driver.py</code>) — se backlog §2.
+      </div>
+
+      <div style={{ overflowX: "auto" }}>
+        <table className="etbl items">
+          <thead>
+            <tr>
+              <th style={{ width: 28 }}></th>
+              <th>ID</th><th>Spørgsmål</th><th>Adfærd</th><th>Søjle</th>
+            </tr>
+          </thead>
+          <tbody>
+            {data.items.map((it: GoldenItem) => (
+              <>
+                <tr key={it.id} className="item-row">
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={picked.includes(it.id)}
+                      disabled={!picked.includes(it.id) && capped}
+                      onChange={() => toggle(it.id)}
+                      aria-label={`Vælg ${it.id}`}
+                    />
+                  </td>
+                  <td onClick={() => setOpen(open === it.id ? null : it.id)}>{it.id}</td>
+                  <td onClick={() => setOpen(open === it.id ? null : it.id)} className="gq">{it.question}</td>
+                  <td onClick={() => setOpen(open === it.id ? null : it.id)}>{it.expected_behavior}</td>
+                  <td onClick={() => setOpen(open === it.id ? null : it.id)}>{it.pillar}</td>
+                </tr>
+                {open === it.id && (
+                  <tr key={it.id + "-gd"} className="item-detail">
+                    <td colSpan={5}>
+                      <div className="id-q"><b>{it.question}</b></div>
+                      <div className="gtags">
+                        {(it.tags ?? []).map((t) => <span key={t} className="gtag">{t}</span>)}
+                      </div>
+                      <details open><summary>Forventet svar (facit)</summary><pre>{it.expected_answer}</pre></details>
+                      <div className="id-checks">
+                        <span className="det">skal indeholde: {termList(it.must_contain)}</span>
+                        <span className="det">må ikke indeholde: {termList(it.must_not_contain)}</span>
+                      </div>
+                      {it.notes && <details><summary>Noter</summary><pre>{it.notes}</pre></details>}
+                    </td>
+                  </tr>
+                )}
+              </>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── E4: smoke runner results ─────────────────────────────────────────────────
+function RunnerPanel({ progress, verdicts, error }: {
+  progress: string;
+  verdicts: EvalRunVerdict[];
+  error: string | null;
+}) {
+  if (!progress && verdicts.length === 0 && !error) return null;
+  return (
+    <div className="dimtable">
+      <h5>Smoke-kørsel</h5>
+      {error && <div className="note bad">{error}</div>}
+      {progress && <div className="note">{progress}</div>}
+      {verdicts.map((v) => (
+        <div key={v.id + v.run_id} className={`verdict ${v.scores.overall_pass ? "ok" : "bad"}`}>
+          <div className="vhead">
+            <b>{v.scores.overall_pass ? "✓" : "✗"} {v.id}</b>
+            <span className="det">{v.scores.detected_behavior}</span>
+            {v.gate_flag && (
+              <span className="gatebadge">🛡 {SCOPE_FLAG_LABELS[v.gate_flag] ?? v.gate_flag}</span>
+            )}
+            <span className="det">{v.latency_s.toFixed(1).replace(".", ",")} s</span>
+            <span className="det">{v.scores.tool_call_count ?? 0} værktøjskald</span>
+          </div>
+          <div className="id-checks">
+            {([
+              ["must_contain", v.scores.must_contain_pass],
+              ["must_not_contain", v.scores.must_not_contain_pass],
+              ["behavior", v.scores.behavior_match],
+              ["citation", v.scores.citation_pass],
+            ] as const).map(([k, ok]) => (
+              <span key={k} className={ok ? "ok" : "bad"}>{ok ? "✓" : "✗"} {k}</span>
+            ))}
+          </div>
+          <details><summary>Svar</summary><pre>{v.answer || "(intet)"}</pre></details>
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -150,6 +345,41 @@ export default function Eval() {
   const [primaryName, setPrimaryName] = useState<string>("");
   const [compareName, setCompareName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  // E4 smoke runner
+  const [running, setRunning] = useState(false);
+  const [progress, setProgress] = useState("");
+  const [verdicts, setVerdicts] = useState<EvalRunVerdict[]>([]);
+  const [runErr, setRunErr] = useState<string | null>(null);
+
+  const runSmoke = async (ids: string[]) => {
+    setRunning(true);
+    setVerdicts([]);
+    setRunErr(null);
+    setProgress(`Starter ${ids.length} item(s) …`);
+    try {
+      await streamEvalRun(ids, (ev) => {
+        const e = ev as Record<string, unknown>;
+        if (e.type === "eval_item_start") {
+          setProgress(`[${e.index}/${e.total}] ${e.id} — ${String(e.question).slice(0, 70)} …`);
+        } else if (e.type === "tool_call") {
+          setProgress((p) => `${p.split(" · ")[0]} · kalder ${e.tool_name}`);
+        } else if (e.type === "scope_gate") {
+          setProgress((p) => `${p.split(" · ")[0]} · 🛡 blokeret (${e.flag})`);
+        } else if (e.type === "eval_item") {
+          setVerdicts((v) => [...v, e as unknown as EvalRunVerdict]);
+        } else if (e.type === "eval_done") {
+          setProgress(`Færdig · ${e.total} item(s)`);
+        }
+      });
+    } catch (err) {
+      setRunErr(String(err instanceof Error ? err.message : err));
+      setProgress("");
+    } finally {
+      setRunning(false);
+      // a UI run persists to mr_runs, so the run list may have new data
+      fetchEvalRuns().then(setRuns).catch(() => {});
+    }
+  };
 
   useEffect(() => {
     fetchEvalRuns()
@@ -168,10 +398,27 @@ export default function Eval() {
 
   if (error) return <div className="placeholder"><div>Kunne ikke indlæse eval-data: {error}</div></div>;
   if (!runs) return <div className="placeholder"><span className="dot" /><div>Indlæser eval-kørsler …</div></div>;
-  if (runs.length === 0) return <div className="placeholder"><div>Ingen eval-kørsler fundet (eval_results_*.jsonl).</div></div>;
+
+  // The golden browser + runner work even with zero result files, so they are
+  // rendered before the run-dependent views bail out.
+  const browser = (
+    <>
+      <GoldenBrowser onRun={runSmoke} running={running} />
+      <RunnerPanel progress={progress} verdicts={verdicts} error={runErr} />
+    </>
+  );
+  if (runs.length === 0) {
+    return (
+      <div className="eval">
+        {browser}
+        <div className="note">Ingen eval-kørsler fundet (eval_results_*.jsonl) — kør en smoke ovenfor.</div>
+      </div>
+    );
+  }
 
   return (
     <div className="eval">
+      {browser}
       <div className="eval-selects">
         <label>Kørsel
           <select value={primaryName} onChange={(e) => setPrimaryName(e.target.value)}>
@@ -193,11 +440,22 @@ export default function Eval() {
             <div className="tile"><div className="v">{primary.pass_pct}%</div><div className="k">beståelse</div></div>
             <div className="tile"><div className="v">{primary.repeat}×</div><div className="k">kørsler · {primary.set_version}</div></div>
             <div className="tile"><div className="v mono">{primary.git_sha}</div><div className="k">app-commit · {shortDate(primary.ts)}</div></div>
+            {primary.gated != null && primary.gated > 0 && (
+              <div className="tile"><div className="v">🛡 {primary.gated}</div><div className="k">besvaret af skjoldet</div></div>
+            )}
           </div>
 
           <DimTable title="Kategori" field="category" primary={primary} compare={compare} />
           <DimTable title="Adfærd" field="behavior" primary={primary} compare={compare} />
+          <DimTable title="Søjle" field="pillar" primary={primary} compare={compare} />
           <DimTable title="Sværhedsgrad" field="difficulty" primary={primary} compare={compare} />
+          <DimTable
+            title="Tags · fokusområder"
+            field="tags"
+            primary={primary}
+            compare={compare}
+            note="Et item tæller i hvert af sine tags, så totalerne er item-tag-par."
+          />
 
           <div className="dimtable">
             <h5>Items · {primary.name}</h5>

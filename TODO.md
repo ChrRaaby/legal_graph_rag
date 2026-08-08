@@ -85,6 +85,24 @@ Deterministic half had already shown zero regression on never-gated items
 
 ---
 
+## E4 — Eval lens v2 ☑ DONE 2026-08-08 (Opus) — **A1 landed with it**
+
+Shipped: `GET /api/eval/golden` (full set + facets + search + tag filtering),
+`POST /api/eval/run` (smoke tier, capped at 5, SSE, scores with the A1 scorer,
+**persists to mr_runs so eval runs are replayable — E3's deferred gap closed**),
+pillar + tags matrix dimensions, and 🛡 gate-verdict badges via template equality.
+**A1: app.py's stale scorer fork deleted**; scoring single-sourced in app.py and
+imported by eval_run. Proven a pure refactor — pre- vs post-refactor scorer:
+**2915/2915 identical** (`scratchpad/a1_refactor_proof.py`).
+Verified: 30 offline checks, API smoke, end-to-end runner smoke, 50 replay
+assertions, Playwright green, CLI unchanged, real-data eyeball. Backlog Phase E.
+
+Residual (small, deliberate): `eval_scope_fixtures.py` output is still not listed
+in the lens, and its records still lack a classifier-model stamp (E0 lesson) —
+scoped as optional/low-priority in the original E4 spec below and left undone.
+
+<details><summary>Original E4 scope (2026-08-02)</summary>
+
 ## E4 — Eval lens v2: golden-set browser + runner in Maskinrummet (NEW, user request 2026-08-02)
 
 **Goal:** port the old Streamlit Evaluation tab's functionality — browse golden-set
@@ -125,6 +143,8 @@ Scope decisions to respect:
   verify like E1–E3: replay assertions + Playwright + eyeball with real data.
 - Lane: Opus (mechanical, spec'd), same session pattern as E1–E3.
 
+</details>
+
 ---
 
 ## Active thread
@@ -155,7 +175,7 @@ Scope decisions to respect:
   violation of ground rule 2, redundant now that BAL retrieval works. Trivial via the
   `c5_bal` template slot; gate with the ladder.
 - ☐ **A2 — delete dead `_attach_kilde`** (app.py, unused since the `0551739` revert).
-  The only Phase-A task not superseded by Phase E.
+  The only Phase-A task left — A1 landed with E4 on 2026-08-08.
 - ☐ **B5 — empty-state example question chips.** The backlog calls this the single
   Phase-B gap Maskinrummet didn't absorb.
 - ☐ **Persist tool args in `log_trajectory`.** Infra gap found during C2: query-level

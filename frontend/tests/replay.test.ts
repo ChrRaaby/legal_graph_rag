@@ -155,5 +155,47 @@ check("scopeGate() is null on a normal run", scopeGate(log) === null);
 check("the shield exists in the idle circuit too",
   circuit.nodes.some((n) => n.id === "gate" && n.cls === "gate"));
 
+// ── E4: a smoke-run event log replays exactly like a chat run ───────────────
+// The runner reuses /api/ask's event shape, so the same pure functions must
+// work on it — that is what makes an eval item scrubbable in Kredsløbet.
+const evalRunLog = [
+  { type: "eval_item_start", index: 1, total: 2, id: "gs-001", question: "Kan jeg få kørselsfradrag?" },
+  { type: "run_start", run_id: "e1", provider: "gemini:gemini-3.5-flash",
+    question: "Kan jeg få kørselsfradrag?", ts: "2026-08-08T10:00:00Z" },
+  { type: "tool_call", elapsed_s: 1.2, tool_name: "Contextual_Text_Retriever", args: { q: "kørselsfradrag" } },
+  { type: "tool_result", elapsed_s: 3.4, tool_name: "Contextual_Text_Retriever",
+    duration_s: 2.2, content_preview: "[{}]", content_full: "[{}]" },
+  { type: "llm", elapsed_s: 4.0, start_s: 3.4, duration_s: 0.6, input_tokens: 900,
+    output_tokens: 120, thinking: "", is_final: true },
+  { type: "answer", text: "Ja, kørselsfradrag efter LL § 9 C." },
+  { type: "done", run_id: "e1", latency_s: 4.2 },
+] as unknown as AgentEvent[];
+
+check("eval-run log yields spans like a chat run", spansFromLog(evalRunLog).length === 2);
+check("eval-run log has a coherent end time", runEndMs(evalRunLog) === 4200);
+check("eval-run log lights the tool node mid-run",
+  circuitOn(evalRunLog, 2000, circuit, null).has("Contextual_Text_Retriever"));
+check("eval-run log is not treated as gated", scopeGate(evalRunLog) === null);
+check("eval-run caption names the tool",
+  /Kontekst-søgning/.test(captionAt(evalRunLog, 1500, false)), captionAt(evalRunLog, 1500, false));
+check("unknown eval_* event types do not break derivations",
+  spansFromLog(evalRunLog).length === spansFromLog(evalRunLog.slice(1)).length);
+
+// A gated eval item: the shield answers, nothing downstream lights.
+const gatedEvalLog = [
+  { type: "eval_item_start", index: 2, total: 2, id: "gs-051", question: "Fortæl mig en joke" },
+  { type: "run_start", run_id: "e2", provider: "gemini:gemini-3.5-flash",
+    question: "Fortæl mig en joke", ts: "2026-08-08T10:01:00Z" },
+  { type: "scope_gate", elapsed_s: 0.5, flag: "non_tax", reason: "ikke skat", duration_s: 0.5 },
+  { type: "answer", text: "Det ligger uden for mit område — jeg svarer kun på spørgsmål om dansk skattelovgivning." },
+  { type: "done", run_id: "e2", latency_s: 0.6 },
+] as unknown as AgentEvent[];
+
+check("gated eval item is detected as gated", scopeGate(gatedEvalLog)?.flag === "non_tax");
+check("gated eval item lights the shield, not the agent",
+  circuitOn(gatedEvalLog, 600, circuit, null).has("gate") &&
+  !circuitOn(gatedEvalLog, 600, circuit, null).has("agent"));
+check("gated eval item produced no spans", spansFromLog(gatedEvalLog).length === 0);
+
 console.log(failures === 0 ? "\nALL PASS" : `\n${failures} FAILURE(S)`);
 if (failures > 0) process.exit(1);

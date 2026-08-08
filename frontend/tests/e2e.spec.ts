@@ -57,5 +57,40 @@ test("live run, lenses, kilder, feedback", async ({ page }) => {
   await expect(page.locator(".etbl.items .item-row").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Værktøjs-sundhed")).toBeVisible();
 
+  // ── E4: golden-set browser ───────────────────────────────────────────────
+  const golden = page.locator(".dimtable.golden");
+  await expect(golden).toBeVisible();
+  await expect(golden.locator("h5")).toContainText("Golden set");
+  const allRows = await golden.locator(".etbl.items .item-row").count();
+  expect(allRows).toBeGreaterThan(20); // whole set is browsable, not just run items
+
+  // Free-text search narrows the list.
+  await golden.locator(".golden-filters input").fill("dagpenge");
+  await expect(golden.locator("h5")).toContainText("1/", { timeout: 10_000 });
+  await expect(golden.locator(".etbl.items .item-row")).toHaveCount(1);
+  await golden.locator("button.ghost", { hasText: "Ryd" }).click();
+
+  // Tag facet filter (the F1 guardrail items).
+  await golden.locator(".golden-filters select").first().selectOption("tags");
+  await golden.locator(".golden-filters select").nth(1).selectOption("f1_gate");
+  await expect(golden.locator(".etbl.items .item-row")).toHaveCount(19, { timeout: 10_000 });
+
+  // Item detail exposes the facit + the must_contain terms.
+  await golden.locator(".etbl.items .item-row td").nth(1).click();
+  await expect(golden.locator(".item-detail")).toBeVisible();
+  await expect(golden.locator(".item-detail .gtag").first()).toBeVisible();
+
+  // Runner is gated behind a selection and capped at 5.
+  const runBtn = golden.locator("button.run");
+  await expect(runBtn).toBeDisabled();
+  await golden.locator('.etbl.items input[type="checkbox"]').first().check();
+  await expect(runBtn).toBeEnabled();
+
+  // Run one gated item end-to-end: it must come back with a shield badge and pass.
+  await runBtn.click();
+  await expect(page.locator(".verdict").first()).toBeVisible({ timeout: 90_000 });
+  await expect(page.locator(".verdict").first()).toHaveClass(/ok/);
+  await expect(page.locator(".verdict .gatebadge").first()).toBeVisible();
+
   expect(errors, "no uncaught page errors").toEqual([]);
 });
