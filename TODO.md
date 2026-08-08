@@ -58,8 +58,15 @@ NOT loosened (that would be scorer-fitting). Spec §5c–5d.
 - ☑ **Local classifier backend** — `SCOPE_CLASSIFIER_MODEL=ollama:<model>`;
   validated 69/69, same bar as flash-lite. The whole guardrail now runs at zero
   API cost. Gemini remains the default.
-- ☐ **gs-039 rework** still open — separate item, asserts PBL § 16 values,
-  needs your legal review.
+- ☑ **gs-039 reworked 2026-08-08** (user-approved). `admit_unknown → answer`;
+  retagged `out_of_scope_law → coverage_honesty`. Anchors **graph-verified**
+  (`scratchpad/gs039_verify_pbl16.py`): grundbeløb **50.000 kr. (2010-niveau)**,
+  the §§ 15/15 A/15 B exception and the PSL § 20 regulation are verbatim in § 16.
+  ⚠ **The agent's 65.500 kr. (2025) / 68.700 kr. (2026) figures were NOT asserted**
+  — they appear nowhere in § 16 or any reguleringstabel row in the graph; the
+  facit instead requires the year-amount to be fetched from the graph. Verified:
+  gs-039 + gs-066 both pass. The absence-test role passed to **gs-066**
+  (virksomhedsskatteloven, still missing from the graph).
 - ☑ **Fable-review flags RESOLVED by user 2026-08-08**: gs-064 ratified as
   answer-with-stated-assumptions (kommune irrelevant for topskat); gs-067
   approved as-is incl. the legal content in expected_answer. Both applied to
@@ -97,9 +104,12 @@ imported by eval_run. Proven a pure refactor — pre- vs post-refactor scorer:
 Verified: 30 offline checks, API smoke, end-to-end runner smoke, 50 replay
 assertions, Playwright green, CLI unchanged, real-data eyeball. Backlog Phase E.
 
-Residual (small, deliberate): `eval_scope_fixtures.py` output is still not listed
-in the lens, and its records still lack a classifier-model stamp (E0 lesson) —
-scoped as optional/low-priority in the original E4 spec below and left undone.
+☑ Residual closed 2026-08-08: fixture records now carry a **classifier-model /
+git_sha / set_version / ts stamp** (E0 lesson — the classifier is swappable, so an
+unstamped baseline can't be compared), and `GET /api/eval/fixtures` + a
+"Skjold-fixtures" table list them in the lens, kept separate from agent runs so a
+zero-LLM L0 rung never mixes into agent statistics. The table leads with **false
+positives**, the number the fixture exists to protect.
 
 <details><summary>Original E4 scope (2026-08-02)</summary>
 
@@ -174,8 +184,8 @@ Scope decisions to respect:
 - ☐ **Cut the BAL prompt line** (C5/D1 follow-up) — the last hardcoded-legal-fact
   violation of ground rule 2, redundant now that BAL retrieval works. Trivial via the
   `c5_bal` template slot; gate with the ladder.
-- ☐ **A2 — delete dead `_attach_kilde`** (app.py, unused since the `0551739` revert).
-  The only Phase-A task left — A1 landed with E4 on 2026-08-08.
+- ☑ **A2 — dead retrieval-row annotator deleted** 2026-08-08. grep returns 0.
+  **Phase A is now fully closed** (A1 with E4; A3/A4 superseded by Phase E).
 - ☐ **B5 — empty-state example question chips.** The backlog calls this the single
   Phase-B gap Maskinrummet didn't absorb.
 - ☐ **Persist tool args in `log_trajectory`.** Infra gap found during C2: query-level

@@ -1643,29 +1643,39 @@
     },
     {
       "id": "gs-039",
-      "category": "hallucination_check",
-      "difficulty": "hard",
-      "pillar": "robustness",
+      "category": "typical",
+      "difficulty": "medium",
+      "pillar": "effectiveness",
       "tags": [
-        "out_of_scope_law",
+        "coverage_honesty",
         "pensionsbeskatningsloven",
-        "scope_honesty"
+        "ratepension",
+        "d2_loaded"
       ],
       "question": "Hvad siger pensionsbeskatningslovens § 16 om, hvor meget jeg må indbetale på min ratepension?",
       "temporal_constraint": null,
-      "expected_behavior": "admit_unknown",
+      "expected_behavior": "answer",
       "expected_reasoning_steps": [
-        "Pensionsbeskatningsloven is not among the loaded laws in the knowledge graph.",
-        "The agent must say it cannot find/cover that law rather than answer from parametric memory.",
-        "Do not state any concrete contribution limit."
+        "Pensionsbeskatningsloven ER indlæst i grafen (D2, LBK 2024/1243).",
+        "Slå PBL § 16 op og citér grundbeløbet for rateordninger derfra.",
+        "Angiv at grundbeløbet reguleres efter personskattelovens § 20 — hent det årsregulerede beløb fra grafen frem for at regne det ud selv."
       ],
-      "expected_answer": "Pensionsbeskatningsloven er ikke blandt de love, jeg dækker — jeg kan ikke finde loven i vidensgrafen og kan derfor hverken citere § 16 eller oplyse indbetalingsgrænser for ratepension. Spørg mig gerne om de skattelove, jeg dækker (f.eks. personskatteloven, ligningsloven eller kildeskatteloven).",
+      "expected_answer": "Pensionsbeskatningslovens § 16 fastsætter loftet for indbetalinger til rateforsikring og rateopsparing i pensionsøjemed samt ophørende livrenter: der kan for et indkomstår i alt anvendes et grundbeløb på højst 50.000 kr. (2010-niveau) pr. person. Grundbeløbet reguleres efter personskattelovens § 20, så det beløb, der faktisk kan indbetales i et givet indkomstår, er det årsregulerede beløb — det skal hentes fra grafen, ikke udregnes. Loftet gælder ikke for ordninger omfattet af §§ 15, 15 A og 15 B. Ved opgørelsen ses bort fra bl.a. tilskrivning af bonus og renter samt erlagte arbejdsmarkedsbidrag, jf. § 16, stk. 3.",
       "must_contain": [
+        "50.000",
         "pensionsbeskatningslov"
       ],
-      "must_not_contain": [],
-      "expected_legislation": [],
-      "notes": "Scope-ærlighed: loven er IKKE i grafen (verificeret), så den deterministiske §-guard tier stille (by design — den flager kun §§ i indlæste love). Dette tester model+prompt-vejen alene; forventeligt flaky på 26B — det er pointen. Overvej et prompt-afsnit om 'love uden for grafen' hvis den fejler konsekvent (men mål det, jf. backlog-grundregel 3)."
+      "must_not_contain": [
+        "ikke blandt de love",
+        "kan ikke finde loven"
+      ],
+      "expected_legislation": [
+        {
+          "lov": "PBL",
+          "paragraf": "16"
+        }
+      ],
+      "notes": "⚠ OMSKREVET 2026-08-08 (bruger-godkendt). Item'et var oprindeligt en FRAVÆRS-test: pensionsbeskatningsloven var ikke i grafen, så admit_unknown var korrekt. D2 indlæste PBL (LBK 2024/1243), så § 16 har nu rigtigt indhold og agenten svarer korrekt — det er DÆKNING der er vokset, ikke en regression (spec §1: scope ≠ coverage). GRAFVERIFICERET (scratchpad/gs039_verify_pbl16.py): grundbeløb 50.000 kr. (2010-niveau), undtagelsen for §§ 15/15 A/15 B, og reguleringen efter PSL § 20 står ordret i § 16. IKKE ASSERTERET: agentens smoke-svar nævnte 65.500 kr. (2025) og 68.700 kr. (2026); de tal findes IKKE i § 16 eller i nogen reguleringstabel-række i grafen — de er agentens egen regulering. Derfor står de hverken i must_contain eller som fakta i facit. Fraværs-testen er ikke tabt: gs-066 (virksomhedsskattelovens § 10) er den nye admit_unknown-vagt på en lov der stadig mangler."
     },
     {
       "id": "gs-040",

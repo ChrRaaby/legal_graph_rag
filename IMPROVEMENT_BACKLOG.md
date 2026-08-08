@@ -103,8 +103,9 @@ cd legal-legislation-explorer
 - **Fix:** single-source the scoring. Because eval_run imports app (not vice versa), **move the current implementations from eval_run.py into app.py** — `_normalize`, `_term_label`, `_term_present`, `detect_behavior` (+ `BEHAVIOR_PRIORITY`, `SUBSTANTIVE_BEHAVIORS`), `behavior_matches`, `score_item` — replacing app.py's stale `_eval_*` copies, and have eval_run.py import them from app. Delete the duplicates in eval_run.py.
 - **Verify:** `python -c` score a synthetic answer against gs-002 via the app-imported function (no crash, any-of works); then `eval_run.py --item-ids gs-002,gs-021 --output /tmp/a1.jsonl` produces identical scores to before (this is pure refactor — CLI behavior must not change).
 
-### A2. Delete dead code `_attach_kilde` ☐
-- app.py:205–230, unused since the `0551739` revert. `grep -n _attach_kilde app.py` must return nothing afterwards.
+### A2. Delete dead code `_attach_kilde` ☑ DONE 2026-08-08 (Opus)
+- Deleted from app.py; `grep -n _attach_kilde app.py` returns **0** (the tombstone comment at the deletion site deliberately avoids the identifier so the verify step stays literally satisfiable). No Python reference remains anywhere outside scratchpad history. A tombstone was left rather than a silent deletion because the code looks useful: it records that this enrichment measured net-negative-or-neutral three times (ground rule 1) and that reviving it needs the §2 protocol, not a restore.
+- **Phase A is now fully closed** — A1 landed with E4, A3/A4 were superseded by Phase E.
 
 ### A3. Make `validate_citations` law-aware ☐
 - **Now:** app.py:1743–1758 extracts § refs from the answer and checks `MATCH (s:Section) WHERE s.number = $num` — **against any law**, so "MOMSL § 33" cited where the answer meant PSL still shows ✅.

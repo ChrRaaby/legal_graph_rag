@@ -851,6 +851,55 @@ def eval_run_items(name: str):
     return JSONResponse({"name": name, "items": items})
 
 
+@app.get("/api/eval/fixtures")
+def eval_fixtures():
+    """Scope-classifier fixture baselines (eval_fixtures_scope_*.jsonl).
+
+    A third results shape: no agent, no tools — one classifier verdict per item.
+    Kept separate from /api/eval/runs on purpose; folding it into the run scanner
+    would mix a zero-LLM L0 rung into agent-run statistics."""
+    base = Path(__file__).parent
+    out = []
+    for p in sorted(base.glob("eval_fixtures_scope_*.jsonl")):
+        rows = []
+        for line in p.read_text(encoding="utf-8").splitlines():
+            if line.strip():
+                try:
+                    rows.append(json.loads(line))
+                except Exception:
+                    pass
+        if not rows:
+            continue
+        first = rows[0]
+        by_flag: dict[str, list[int]] = {}
+        for r in rows:
+            key = r.get("expect") or "ingen flag"
+            a = by_flag.setdefault(key, [0, 0])
+            a[1] += 1
+            if r.get("pass"):
+                a[0] += 1
+        in_scope = [r for r in rows if not r.get("expect")]
+        out.append({
+            "name": p.name,
+            # unstamped pre-2026-08-08 baselines fall back to "—" rather than lie
+            "classifier_model": first.get("classifier_model") or "—",
+            "git_sha": first.get("git_sha") or "—",
+            "set_version": first.get("set_version") or "—",
+            "ts": first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ",
+                                                   time.gmtime(p.stat().st_mtime)),
+            "n": len(rows),
+            "passed": sum(1 for r in rows if r.get("pass")),
+            "errors": sum(1 for r in rows if r.get("error")),
+            # the number this fixture exists to protect
+            "false_positives": sum(1 for r in in_scope if r.get("got")),
+            "in_scope": len(in_scope),
+            "by_flag": [{"value": k, "pass": v[0], "total": v[1]}
+                        for k, v in sorted(by_flag.items())],
+        })
+    out.sort(key=lambda r: r["ts"], reverse=True)
+    return JSONResponse(out)
+
+
 # ── E4: golden-set browser ────────────────────────────────────────────────────
 
 @app.get("/api/eval/golden")

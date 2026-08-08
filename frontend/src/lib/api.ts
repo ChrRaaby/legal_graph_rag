@@ -248,6 +248,26 @@ export async function postAnalyze(runId: string, question: string, context: stri
   return data.answer as string;
 }
 
+export interface ScopeFixture {
+  name: string;
+  classifier_model: string;
+  git_sha: string;
+  set_version: string;
+  ts: string;
+  n: number;
+  passed: number;
+  errors: number;
+  false_positives: number;
+  in_scope: number;
+  by_flag: EvalDimRow[];
+}
+
+export async function fetchScopeFixtures(): Promise<ScopeFixture[]> {
+  const res = await fetch("/api/eval/fixtures");
+  if (!res.ok) throw new Error(`eval/fixtures ${res.status}`);
+  return (await res.json()) as ScopeFixture[];
+}
+
 export async function fetchGolden(params: { q?: string; dim?: string; value?: string } = {}): Promise<GoldenSet> {
   const qs = new URLSearchParams();
   if (params.q) qs.set("q", params.q);

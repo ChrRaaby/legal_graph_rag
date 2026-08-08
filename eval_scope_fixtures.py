@@ -18,7 +18,9 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import MagicMock
@@ -39,6 +41,29 @@ import logging  # noqa: E402
 logging.getLogger("neo4j").setLevel(logging.ERROR)
 
 from app import classify_request, scope_flag, SCOPE_CLASSIFIER_MODEL  # noqa: E402
+
+
+def _git_sha() -> str:
+    """Short SHA, never fatal — same contract as eval_run's E0 helper."""
+    try:
+        r = subprocess.run(["git", "rev-parse", "--short", "HEAD"],
+                           capture_output=True, text=True, cwd=REPO, timeout=5)
+        sha = r.stdout.strip()
+        if sha:
+            dirty = subprocess.run(["git", "status", "--porcelain"], capture_output=True,
+                                   text=True, cwd=REPO, timeout=5).stdout.strip()
+            return sha + ("-dirty" if dirty else "")
+    except Exception:
+        pass
+    return "unknown"
+
+
+def _set_version(golden_set: str) -> str:
+    try:
+        gs = json.loads((REPO / golden_set).read_text(encoding="utf-8"))
+        return gs.get("metadata", {}).get("version", "—")
+    except Exception:
+        return "—"
 
 
 def main() -> int:
@@ -79,10 +104,22 @@ def main() -> int:
     print(f"Scope-classifier fixture — {len(cases)} case(s), model={SCOPE_CLASSIFIER_MODEL}")
     print("(no agent, no tools, no retrieval)\n")
 
+    # E0 lesson (run-metadata stamping): a fixture record must say WHICH
+    # classifier produced it. The model is swappable (gemini-3.5-flash-lite vs
+    # ollama:gemma4:26b), so an unstamped baseline file cannot be compared to a
+    # later one — the same trap E0 fixed for eval_run records.
+    stamp = {
+        "classifier_model": SCOPE_CLASSIFIER_MODEL,
+        "git_sha": _git_sha(),
+        "set_version": str(_set_version(args.golden_set)) if not args.expect_file else "—",
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    print(f"stamp: {stamp['classifier_model']} · {stamp['git_sha']} · set {stamp['set_version']}\n")
+
     def run(case: dict) -> dict:
         verdict = classify_request(case["question"])
         got = scope_flag(verdict)
-        return {**case, "got": got, "reason": verdict.get("reason", ""),
+        return {**case, **stamp, "got": got, "reason": verdict.get("reason", ""),
                 "error": verdict.get("error"), "pass": got == case["expect"]}
 
     with ThreadPoolExecutor(max_workers=max(1, args.workers)) as ex:

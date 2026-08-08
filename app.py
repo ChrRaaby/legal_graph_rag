@@ -388,32 +388,14 @@ def _build_system_prompt(lean: bool, prune: bool = True) -> str:
 _RUNTIME_ANALYSIS = None
 
 
-def _attach_kilde(rows: list) -> list:
-    """Annotate each retrieval row with a copy-paste-ready 'kilde' citation and a
-    'gyldighed' (validity) marker.
-
-    - 'kilde': a pre-formatted citation (e.g. "Aktieavancebeskatningsloven § 13 A,
-      stk. 1") the model can quote verbatim instead of composing from separate
-      fields. Built deterministically from graph data — never fabricated.
-    - 'gyldighed': whether the text is from the law version currently in force or
-      a superseded historic version (from the is_current flag set by
-      build_supersedes_edges.py). Lets the model avoid quoting repealed text — the
-      retriever already ranks current versions first."""
-    for r in rows:
-        if not isinstance(r, dict):
-            continue
-        if "is_current" in r:
-            r["gyldighed"] = "gældende" if r.get("is_current") else "historisk (ophævet version — citér ikke som gældende ret)"
-        lov = (r.get("legislation_short") or r.get("legislation_title") or "").strip()
-        sec = r.get("section_number")
-        if not (lov and sec):
-            continue
-        kilde = f"{lov} § {str(sec).strip()}"
-        par = r.get("paragraph_number")
-        if par:
-            kilde += f", stk. {str(par).strip()}"
-        r["kilde"] = kilde
-    return rows
+# A2 (2026-08-08): the retrieval-row citation/validity annotator was deleted
+# here. It stamped each row with a pre-formatted source label and a
+# gældende/historisk marker, and became dead code at the `0551739` revert — that
+# enrichment measured net-negative-or-neutral on gemma-26B three times over
+# (ground rule 1: the model cannot absorb extra context in the generation call;
+# extra graph data belongs in on-demand tools or narrowing steps, never appended
+# to retrieval rows). It survives in git history — but reviving it would need the
+# §2 measurement protocol, not a restore.
 
 
 def _is_connection_error(exc: Exception) -> bool:

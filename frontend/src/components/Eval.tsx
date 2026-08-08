@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchEvalRuns, fetchEvalItems, fetchToolHealth, fetchGolden, streamEvalRun,
+  fetchScopeFixtures,
   type EvalRun, type EvalItem, type ToolHealthRow,
-  type GoldenSet, type GoldenItem, type EvalRunVerdict,
+  type GoldenSet, type GoldenItem, type EvalRunVerdict, type ScopeFixture,
 } from "../lib/api";
 import { SCOPE_FLAG_LABELS } from "../lib/events";
 
@@ -305,6 +306,45 @@ function RunnerPanel({ progress, verdicts, error }: {
   );
 }
 
+/** Scope-classifier fixtures: the zero-LLM L0 rung, kept visually distinct from
+ *  agent runs because it measures the gate, not the agent. */
+function ScopeFixtures() {
+  const [rows, setRows] = useState<ScopeFixture[] | null>(null);
+  useEffect(() => { fetchScopeFixtures().then(setRows).catch(() => setRows([])); }, []);
+  if (!rows || rows.length === 0) return null;
+  return (
+    <div className="dimtable">
+      <h5>Skjold-fixtures · klassifikator uden agent</h5>
+      <div className="note">
+        L0-trinnet: ét klassifikator-kald pr. item, ingen agent og ingen graf.
+        <b> Falske positiver</b> er tallet den findes for — et in-scope item der bliver blokeret.
+      </div>
+      <div style={{ overflowX: "auto" }}>
+        <table className="etbl">
+          <thead>
+            <tr>
+              <th>Fil</th><th>Klassifikator</th><th className="num">bestået</th>
+              <th className="num">falske pos.</th><th className="num">fejl</th><th>sæt · commit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((f) => (
+              <tr key={f.name} className={f.false_positives > 0 ? "worst" : ""}>
+                <td>{f.name.replace("eval_fixtures_scope_", "").replace(".jsonl", "")}</td>
+                <td className="mono">{f.classifier_model}</td>
+                <td className="num">{f.passed}/{f.n}</td>
+                <td className="num">{f.false_positives}/{f.in_scope}</td>
+                <td className="num">{f.errors}</td>
+                <td className="mono">{f.set_version} · {f.git_sha}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  );
+}
+
 function ToolHealth() {
   const [rows, setRows] = useState<ToolHealthRow[] | null>(null);
   const [nRuns, setNRuns] = useState(0);
@@ -463,6 +503,7 @@ export default function Eval() {
             <ItemsTable name={primary.name} />
           </div>
 
+          <ScopeFixtures />
           <ToolHealth />
         </>
       )}
