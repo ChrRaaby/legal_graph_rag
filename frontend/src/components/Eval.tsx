@@ -87,7 +87,10 @@ function DimTable({ title, field, primary, compare, note }: {
   );
 }
 
-function ItemsTable({ name }: { name: string }) {
+function ItemsTable({ name, onInspectRun }: {
+  name: string;
+  onInspectRun?: (runId: string) => void;
+}) {
   const [items, setItems] = useState<EvalItem[] | null>(null);
   const [open, setOpen] = useState<string | null>(null);
   useEffect(() => {
@@ -138,6 +141,19 @@ function ItemsTable({ name }: { name: string }) {
                       <UsageBits usage={it.usage} />
                       {it.latency_s != null && (
                         <span className="det">{it.latency_s.toFixed(1).replace(".", ",")} s</span>
+                      )}
+                      {onInspectRun && it.run_id ? (
+                        <button
+                          className="ghost inspect"
+                          onClick={(e) => { e.stopPropagation(); onInspectRun(it.run_id!); }}
+                          title="Åbn kørslen i lenserne"
+                        >
+                          🔬 Inspicér
+                        </button>
+                      ) : (
+                        <span className="det" title="Kun smoke-kørsler fra UI'et gemmer et hændelseslog der kan afspilles">
+                          ingen afspilning (CLI-kørsel)
+                        </span>
                       )}
                     </div>
                     {(it.tool_sequence?.length ?? 0) > 0 && (
@@ -300,10 +316,11 @@ function GoldenBrowser({ onRun, running, onLoaded }: {
 }
 
 // ── E4: smoke runner results ─────────────────────────────────────────────────
-function RunnerPanel({ progress, verdicts, error }: {
+function RunnerPanel({ progress, verdicts, error, onInspectRun }: {
   progress: string;
   verdicts: EvalRunVerdict[];
   error: string | null;
+  onInspectRun?: (runId: string) => void;
 }) {
   if (!progress && verdicts.length === 0 && !error) return null;
   return (
@@ -321,6 +338,15 @@ function RunnerPanel({ progress, verdicts, error }: {
             )}
             <span className="det">{v.latency_s.toFixed(1).replace(".", ",")} s</span>
             <UsageBits usage={v.usage} />
+            {onInspectRun && v.run_id && (
+              <button
+                className="ghost inspect"
+                onClick={() => onInspectRun(v.run_id)}
+                title="Åbn kørslen i Kredsløbet, Graflinsen og Tankestrømmen — som et almindeligt spørgsmål"
+              >
+                🔬 Inspicér
+              </button>
+            )}
           </div>
           {(v.tool_sequence?.length ?? 0) > 0 && (
             <div className="gtags">
@@ -420,7 +446,7 @@ function ToolHealth() {
   );
 }
 
-export default function Eval() {
+export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) => void } = {}) {
   const [runs, setRuns] = useState<EvalRun[] | null>(null);
   const [primaryName, setPrimaryName] = useState<string>("");
   const [compareName, setCompareName] = useState<string>("");
@@ -508,7 +534,8 @@ export default function Eval() {
       <div className="eval">
         {subtabs}
         <GoldenBrowser onRun={runSmoke} running={running} onLoaded={setGolden} />
-        <RunnerPanel progress={progress} verdicts={verdicts} error={runErr} />
+        <RunnerPanel progress={progress} verdicts={verdicts} error={runErr}
+                     onInspectRun={onInspectRun} />
       </div>
     );
   }
@@ -593,7 +620,7 @@ export default function Eval() {
           <div className="dimtable">
             <h5>Items · {primary.name}</h5>
             <div className="note">Klik en række for svar + hvilke tjek der fejlede. Rød = aldrig bestået, gul = flaky.</div>
-            <ItemsTable name={primary.name} />
+            <ItemsTable name={primary.name} onInspectRun={onInspectRun} />
           </div>
 
           <ScopeFixtures />

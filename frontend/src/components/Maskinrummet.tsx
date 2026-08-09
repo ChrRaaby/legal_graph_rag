@@ -23,6 +23,8 @@ interface Props {
   onTab: (t: TabId) => void;
   selectedNodeId: string | null;
   onSelectNode: (id: string | null) => void;
+  /** Load a persisted eval run into the lenses (Eval → Kredsløbet). */
+  onInspectRun?: (runId: string) => void;
 }
 
 const LABELS: Record<TabId, string> = {
@@ -34,6 +36,7 @@ const LABELS: Record<TabId, string> = {
 
 export default function Maskinrummet({
   tools, log, clock, question, provider, answer, runId, tab, onTab, selectedNodeId, onSelectNode,
+  onInspectRun,
 }: Props) {
   const caption = captionAt(log, clock.t, clock.live);
   const t = clock.t;
@@ -83,7 +86,7 @@ export default function Maskinrummet({
           <Tankestrom log={log} t={t} live={clock.live} question={question} provider={provider} runId={runId} />
         </div>
         <div className={`layer${tab === "evalx" ? " active" : ""}`} role="tabpanel">
-          {tab === "evalx" && <Eval />}
+          {tab === "evalx" && <Eval onInspectRun={onInspectRun} />}
         </div>
       </div>
 

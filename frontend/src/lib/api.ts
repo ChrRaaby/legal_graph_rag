@@ -103,6 +103,8 @@ export interface EvalItem {
   usage?: Usage | null;
   latency_s?: number;
   tool_sequence?: string[];
+  run_id?: string | null;  // smoke records only — CLI runs store no event log
+  source?: string | null;  // "smoke" for UI-triggered runs
   scores: {
     must_contain: boolean;
     must_not_contain: boolean;
@@ -142,6 +144,7 @@ export interface GoldenSet {
 }
 export interface EvalRunVerdict {
   id: string;
+  /** mr_runs id — its full event log makes the smoke replayable in the lenses. */
   run_id: string;
   latency_s: number;
   answer: string;

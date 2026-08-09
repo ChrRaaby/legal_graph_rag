@@ -65,6 +65,14 @@ export default function App() {
     fetchTrace(runId).then(run.loadTrace).catch(() => {});
   }, [run]);
 
+  /** Load an eval run into the lenses and jump to Kredsløbet — the same
+   *  inspection a real chat turn gets. Only smoke runs carry a run_id (their
+   *  events are persisted); CLI runs have no event log to replay. */
+  const inspectRun = useCallback((runId: string) => {
+    loadHistory(runId);
+    setTab("kredslob");
+  }, [loadHistory]);
+
   if (archError) {
     return (
       <div className="app">
@@ -146,6 +154,7 @@ export default function App() {
             onTab={setTab}
             selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}
+            onInspectRun={inspectRun}
           />
         )}
       </div>

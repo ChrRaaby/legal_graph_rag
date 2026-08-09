@@ -153,6 +153,8 @@ button.ghost{background:none;border:1px solid var(--line);color:var(--ink-2);bor
 .verdict.ok{border-left-color:var(--accent)}
 .verdict.bad{border-left-color:var(--warn,#c9832b)}
 .verdict .vhead{display:flex;gap:10px;align-items:center;flex-wrap:wrap;margin-bottom:4px}
+button.ghost.inspect{padding:2px 8px;font-size:11.5px;color:var(--accent);border-color:var(--accent)}
+button.ghost.inspect:hover{background:var(--panel-2)}
 .note.bad{color:var(--warn,#c9832b)}
 
 /* F1 scope-gate card in Tankestrømmen */

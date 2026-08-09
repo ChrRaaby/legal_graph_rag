@@ -850,6 +850,7 @@ def eval_run_items(name: str):
             "id": it["id"], "category": it.get("category"), "difficulty": it.get("difficulty"),
             "expected_behavior": it.get("expected_behavior"), "question": it.get("question", ""),
             "runs": 0, "passes": 0, "answer": "", "scores": {},
+            "run_id": None, "source": None,
         })
         e["runs"] += 1
         if r["scores"].get("overall_pass"):
@@ -858,6 +859,10 @@ def eval_run_items(name: str):
         e["gate_flag"] = _gate_flag(r.get("answer", ""))   # E4: mark gated rows
         e["usage"] = r.get("usage")                        # tokens + cost (may be None)
         e["latency_s"] = r.get("latency_s")
+        # Smoke records carry a run_id whose full event log is in mr_runs, so the
+        # UI can replay them in the lenses. CLI records have none (E3 gap).
+        e["run_id"] = r.get("run_id")
+        e["source"] = r.get("source")
         sc = r["scores"]
         e["tool_sequence"] = sc.get("tool_sequence") or []
         e["scores"] = {
@@ -1013,6 +1018,41 @@ async def eval_run_smoke(request: Request):
                              headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
 
+_SMOKE_LOCK = threading.Lock()
+
+
+def _smoke_history_path() -> Path:
+    """One file per day, so a day's smokes read as a single run in Historik
+    instead of littering it with one file per click."""
+    day = time.strftime("%Y%m%d", time.gmtime())
+    return Path(EVAL_HISTORY_DIR) / f"eval_results_smoke_{day}.jsonl"
+
+
+def _append_smoke_record(item: dict, answer: str, latency: float, scores: dict,
+                         tool_events: list[dict], run_id: str) -> None:
+    """Append one smoke result in the same record shape eval_run.py writes, so
+    /api/eval/runs can summarise it with no special-casing."""
+    rec = {
+        "item": item,
+        "answer": answer,
+        "latency_s": latency,
+        "scores": scores,
+        "run_idx": 1,
+        "git_sha": _git_sha(),
+        "provider": PROVIDER,
+        "set_version": str(_load_golden().get("metadata", {}).get("version", "")),
+        "usage": token_usage(tool_events),
+        "run_id": run_id,          # only smoke records have this → replayable
+        "source": "smoke",         # distinguishes a UI smoke from a CLI run
+        "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+    }
+    p = _smoke_history_path()
+    p.parent.mkdir(parents=True, exist_ok=True)
+    with _SMOKE_LOCK:
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+
+
 def _eval_run_events(items: list[dict]):
     """SSE generator for a smoke run: per item, the normal agent event stream
     (so the UI can light Kredsløbet), then an `eval_item` verdict event."""
@@ -1087,6 +1127,15 @@ def _eval_run_events(items: list[dict]):
                          resolve_citations(answer))
         except Exception as exc:  # noqa: BLE001
             print(f"  eval run persist failed: {exc}", flush=True)
+
+        # …and as an eval record, so the smoke shows up in the Historik tab next
+        # to CLI runs. `run_id` rides along — it is what lets the history
+        # drill-down replay this item, which CLI records can never offer (they
+        # carry no event log).
+        try:
+            _append_smoke_record(item, answer, latency, scores, tool_events, run_id)
+        except Exception as exc:  # noqa: BLE001
+            print(f"  smoke history append failed: {exc}", flush=True)
 
         yield _sse({"type": "eval_item", "index": n, "total": len(items),
                     "id": item["id"], "run_id": run_id, "latency_s": latency,
