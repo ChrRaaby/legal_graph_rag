@@ -4,3 +4,10 @@ __pycache__
 .git
 .env
 frontend/node_modules
+danish_json_out/
+whitepapers/
+_uk_archive/
+renderings/
+eval_history/*
+!eval_history/eval_fixtures_baseline.jsonl
+!eval_history/eval_fixtures_scope_baseline.jsonl

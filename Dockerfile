@@ -33,6 +33,6 @@ COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 # Expose the port Cloud Run expects
 EXPOSE 8080
 
-# Run the server in prod mode on port 8080
-ENV APP_MODE=user
+# Run the server in dev mode on port 8080 by default (as per user preference)
+ENV APP_MODE=dev
 CMD ["uvicorn", "server:app", "--host", "0.0.0.0", "--port", "8080"]

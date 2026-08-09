@@ -385,6 +385,18 @@ def node_detail(element_id: str) -> dict:
 _DB_PATH = str(Path(__file__).parent / "observability.db")
 _db_lock = threading.Lock()
 
+try:
+    from google.cloud import firestore
+    from google.cloud import storage
+    _firestore_client = firestore.Client(project="gen-lang-client-0167283966", database="(default)")
+    _storage_client = storage.Client(project="gen-lang-client-0167283966")
+    _gcs_bucket = _storage_client.bucket("gen-lang-client-0167283966-eval-history")
+except Exception as _e:
+    print(f"[WARN] GCP clients failed to init: {_e}")
+    _firestore_client = None
+    _storage_client = None
+    _gcs_bucket = None
+
 
 def _db() -> sqlite3.Connection:
     con = sqlite3.connect(_DB_PATH, check_same_thread=False)
@@ -401,10 +413,6 @@ def _db() -> sqlite3.Connection:
 
 def _persist_run(run_id: str, question: str, answer: str, latency_s: float,
                  events: list[dict], citations: list[dict]) -> None:
-    # F1: a pii-gated prompt is never stored verbatim (spec §6.4). Applied here,
-    # at the single write choke point, so no caller can bypass it. The run_start
-    # event carries its own copy of the question, so the event log must be
-    # scrubbed too — redacting only the column would still persist the PII.
     redacted = redact_if_pii(question, events)
     if redacted != question:
         events = [
@@ -412,6 +420,25 @@ def _persist_run(run_id: str, question: str, answer: str, latency_s: float,
             for ev in events
         ]
     question = redacted
+
+    if _firestore_client:
+        try:
+            doc_ref = _firestore_client.collection("mr_runs").document(run_id)
+            doc_ref.set({
+                "run_id": run_id,
+                "ts": firestore.SERVER_TIMESTAMP,
+                "question": question,
+                "answer": answer,
+                "provider": PROVIDER,
+                "git_sha": _git_sha(),
+                "latency_s": latency_s,
+                "events": json.dumps(events, ensure_ascii=False, default=str),
+                "citations": json.dumps(citations, ensure_ascii=False)
+            })
+            return
+        except Exception as e:
+            print(f"[WARN] Firestore write failed, falling back to SQLite: {e}")
+
     with _db_lock:
         con = _db()
         con.execute(
@@ -635,6 +662,25 @@ async def run_analyze(run_id: str, request: Request):
 @app.get("/api/traces")
 def traces():
     """Recent runs for the history list (newest first)."""
+    if _firestore_client:
+        try:
+            docs = _firestore_client.collection("mr_runs").order_by("ts", direction=firestore.Query.DESCENDING).limit(30).stream()
+            rows = []
+            for doc in docs:
+                d = doc.to_dict()
+                ts_val = d.get("ts")
+                ts_str = ts_val.isoformat() if hasattr(ts_val, "isoformat") else str(ts_val)
+                rows.append({
+                    "run_id": d.get("run_id"),
+                    "ts": ts_str,
+                    "question": d.get("question"),
+                    "provider": d.get("provider"),
+                    "latency_s": d.get("latency_s")
+                })
+            return JSONResponse(rows)
+        except Exception as e:
+            print(f"[WARN] Firestore read failed, falling back to SQLite: {e}")
+
     with _db_lock:
         con = _db()
         rows = con.execute(
@@ -647,6 +693,22 @@ def traces():
 @app.get("/api/traces/{run_id}")
 def trace(run_id: str):
     """A saved run's full event log + citations, for identical replay."""
+    if _firestore_client:
+        try:
+            doc = _firestore_client.collection("mr_runs").document(run_id).get()
+            if doc.exists:
+                d = doc.to_dict()
+                ts_val = d.get("ts")
+                ts_str = ts_val.isoformat() if hasattr(ts_val, "isoformat") else str(ts_val)
+                return JSONResponse({
+                    "run_id": d.get("run_id"), "ts": ts_str, "question": d.get("question"),
+                    "answer": d.get("answer"), "provider": d.get("provider"), "latency_s": d.get("latency_s"),
+                    "events": json.loads(d.get("events") or "[]"),
+                    "citations": json.loads(d.get("citations") or "[]"),
+                })
+        except Exception as e:
+            print(f"[WARN] Firestore read failed, falling back to SQLite: {e}")
+
     with _db_lock:
         con = _db()
         row = con.execute("SELECT * FROM mr_runs WHERE run_id = ?", (run_id,)).fetchone()
@@ -714,13 +776,19 @@ def _gate_flag(answer: str) -> str | None:
     return _gate_templates().get((answer or "").strip())
 
 
-def _scan_eval_file(path: Path) -> dict | None:
+def _scan_eval_file(path_or_content) -> dict | None:
     """Summarise one eval_results_*.jsonl: mean pass, repeat count, and a
     pass-% breakdown per dimension. Returns None for empty/non-standard files."""
     records: list[dict] = []
     first: dict | None = None
+    name_fallback = ""
     try:
-        for line in path.read_text(encoding="utf-8").splitlines():
+        if hasattr(path_or_content, "read_text"):
+            lines = path_or_content.read_text(encoding="utf-8").splitlines()
+            name_fallback = path_or_content.name
+        else:
+            lines = path_or_content.splitlines()
+        for line in lines:
             if not line.strip():
                 continue
             r = json.loads(line)
@@ -800,6 +868,7 @@ def _scan_eval_file(path: Path) -> dict | None:
         "gated": gated,          # records answered by the F1 scope gate
         "usage": usage,          # tokens + cost; None for pre-2026-08-08 files
         "tool_calls": tool_calls_total,
+        "name": name_fallback,
     }
 
 
@@ -809,6 +878,25 @@ def eval_runs():
     # scanned so an older checkout (or a hand-dropped file) is not invisible.
     out = []
     seen: set[str] = set()
+
+    if _gcs_bucket:
+        try:
+            for blob in _gcs_bucket.list_blobs(prefix="eval_history/"):
+                if blob.name.startswith("eval_history/eval_results_") and blob.name.endswith(".jsonl"):
+                    name = blob.name.split("/")[-1]
+                    if name in seen:
+                        continue
+                    seen.add(name)
+                    content = blob.download_as_text()
+                    if not content:
+                        continue
+                    s = _scan_eval_file(content)
+                    if s:
+                        s["name"] = name
+                        out.append(s)
+        except Exception as e:
+            print(f"[WARN] GCS list blobs failed: {e}")
+
     for base in (Path(EVAL_HISTORY_DIR), Path(__file__).parent):
         for p in base.glob("eval_results_*.jsonl"):
             if p.name in seen:
@@ -818,6 +906,8 @@ def eval_runs():
                 continue
             s = _scan_eval_file(p)
             if s:
+                if not s.get("name"):
+                    s["name"] = p.name
                 out.append(s)
     out.sort(key=lambda r: r["ts"], reverse=True)
     return JSONResponse(out)
@@ -831,12 +921,25 @@ def eval_run_items(name: str):
     # eval_history/ first, then the root for older layouts.
     if "/" in name or ".." in name or not name.startswith("eval_results_"):
         return JSONResponse({"error": "bad name"}, status_code=400)
-    path = next((p for p in (Path(EVAL_HISTORY_DIR) / name, Path(__file__).parent / name)
-                 if p.is_file()), None)
-    if path is None:
-        return JSONResponse({"error": "not found"}, status_code=404)
+    
+    lines = None
+    if _gcs_bucket:
+        try:
+            blob = _gcs_bucket.blob(f"eval_history/{name}")
+            if blob.exists():
+                lines = blob.download_as_text().splitlines()
+        except Exception as e:
+            print(f"[WARN] GCS blob download failed: {e}")
+
+    if lines is None:
+        path = next((p for p in (Path(EVAL_HISTORY_DIR) / name, Path(__file__).parent / name)
+                     if p.is_file()), None)
+        if path is None:
+            return JSONResponse({"error": "not found"}, status_code=404)
+        lines = path.read_text(encoding="utf-8").splitlines()
+
     by_item: dict[str, dict] = {}
-    for line in path.read_text(encoding="utf-8").splitlines():
+    for line in lines:
         if not line.strip():
             continue
         try:
@@ -882,11 +985,26 @@ def eval_fixtures():
     Kept separate from /api/eval/runs on purpose; folding it into the run scanner
     would mix a zero-LLM L0 rung into agent-run statistics."""
     out = []
-    paths = sorted(Path(EVAL_HISTORY_DIR).glob("eval_fixtures_scope_*.jsonl")) or \
-        sorted(Path(__file__).parent.glob("eval_fixtures_scope_*.jsonl"))
-    for p in paths:
+    
+    fixtures_data = []
+    if _gcs_bucket:
+        try:
+            for blob in _gcs_bucket.list_blobs(prefix="eval_history/"):
+                if blob.name.startswith("eval_history/eval_fixtures_scope_") and blob.name.endswith(".jsonl"):
+                    content = blob.download_as_text()
+                    fixtures_data.append((blob.name.split("/")[-1], content.splitlines(), None))
+        except Exception as e:
+            print(f"[WARN] GCS eval_fixtures list failed: {e}")
+
+    if not fixtures_data:
+        paths = sorted(Path(EVAL_HISTORY_DIR).glob("eval_fixtures_scope_*.jsonl")) or \
+            sorted(Path(__file__).parent.glob("eval_fixtures_scope_*.jsonl"))
+        for p in paths:
+            fixtures_data.append((p.name, p.read_text(encoding="utf-8").splitlines(), p.stat().st_mtime))
+
+    for name, lines, mtime in fixtures_data:
         rows = []
-        for line in p.read_text(encoding="utf-8").splitlines():
+        for line in lines:
             if line.strip():
                 try:
                     rows.append(json.loads(line))
@@ -904,13 +1022,12 @@ def eval_fixtures():
                 a[0] += 1
         in_scope = [r for r in rows if not r.get("expect")]
         out.append({
-            "name": p.name,
+            "name": name,
             # unstamped pre-2026-08-08 baselines fall back to "—" rather than lie
             "classifier_model": first.get("classifier_model") or "—",
             "git_sha": first.get("git_sha") or "—",
             "set_version": first.get("set_version") or "—",
-            "ts": first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ",
-                                                   time.gmtime(p.stat().st_mtime)),
+            "ts": first.get("ts") or (time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime)) if mtime else "—"),
             "n": len(rows),
             "passed": sum(1 for r in rows if r.get("pass")),
             "errors": sum(1 for r in rows if r.get("error")),
@@ -1047,10 +1164,26 @@ def _append_smoke_record(item: dict, answer: str, latency: float, scores: dict,
         "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
     }
     p = _smoke_history_path()
-    p.parent.mkdir(parents=True, exist_ok=True)
-    with _SMOKE_LOCK:
-        with open(p, "a", encoding="utf-8") as f:
-            f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    if _gcs_bucket:
+        try:
+            blob = _gcs_bucket.blob(f"eval_history/{p.name}")
+            try:
+                content = blob.download_as_text()
+            except Exception:
+                content = ""
+            content += json.dumps(rec, ensure_ascii=False) + "\n"
+            blob.upload_from_string(content)
+        except Exception as e:
+            print(f"[WARN] GCS append failed: {e}")
+            p.parent.mkdir(parents=True, exist_ok=True)
+            with _SMOKE_LOCK:
+                with open(p, "a", encoding="utf-8") as f:
+                    f.write(json.dumps(rec, ensure_ascii=False) + "\n")
+    else:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        with _SMOKE_LOCK:
+            with open(p, "a", encoding="utf-8") as f:
+                f.write(json.dumps(rec, ensure_ascii=False) + "\n")
 
 
 def _eval_run_events(items: list[dict]):
@@ -1153,10 +1286,22 @@ def tools_health():
     empty-result rate, mean duration. Empty output was the tell for the dead
     tools this project has hit before."""
     agg: dict[str, dict] = {}
-    with _db_lock:
-        con = _db()
-        rows = con.execute("SELECT events FROM mr_runs ORDER BY ts DESC LIMIT 200").fetchall()
-        con.close()
+    
+    rows = []
+    if _firestore_client:
+        try:
+            docs = _firestore_client.collection("mr_runs").order_by("ts", direction=firestore.Query.DESCENDING).limit(200).stream()
+            for doc in docs:
+                rows.append({"events": doc.to_dict().get("events")})
+        except Exception as e:
+            print(f"[WARN] Firestore read failed, falling back to SQLite: {e}")
+            rows = []
+
+    if not rows:
+        with _db_lock:
+            con = _db()
+            rows = con.execute("SELECT events FROM mr_runs ORDER BY ts DESC LIMIT 200").fetchall()
+            con.close()
     for row in rows:
         try:
             events = json.loads(row["events"] or "[]")
@@ -1190,6 +1335,19 @@ async def feedback(request: Request):
     verdict = body.get("verdict")
     if verdict not in ("up", "down"):
         return JSONResponse({"error": "verdict must be 'up' or 'down'."}, status_code=400)
+    
+    if _firestore_client:
+        try:
+            _firestore_client.collection("mr_feedback").add({
+                "run_id": body.get("run_id"),
+                "ts": firestore.SERVER_TIMESTAMP,
+                "verdict": verdict,
+                "comment": (body.get("comment") or "")[:2000]
+            })
+            return JSONResponse({"ok": True})
+        except Exception as e:
+            print(f"[WARN] Firestore write failed, falling back to SQLite: {e}")
+
     with _db_lock:
         con = _db()
         con.execute("INSERT INTO mr_feedback (run_id, verdict, comment) VALUES (?,?,?)",
