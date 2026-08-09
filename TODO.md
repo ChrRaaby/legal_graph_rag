@@ -295,7 +295,7 @@ Scope decisions to respect:
 
 | Item | Gate |
 |---|---|
-| GCP Cloud Run deployment | **Paused by user 2026-07-04**; APP_MODE prerequisite is in scope |
+| GCP Cloud Run deployment | **Delegated to Gemini 2026-08-09** — handover prompt: `whitepapers/gcp_persistence_handover.md`. Verified live: `/api/eval/runs` returns `[]` because run files are gitignored (so absent from the image) AND Cloud Run's filesystem is ephemeral (mr_runs + smoke records vanish on restart); `APP_MODE=user` also hides the Eval tab entirely. Live config has drifted (2.5-flash / 11 tools vs 3.5-flash / 12 local) — **the deployed agent is not the substrate the evals measure.** |
 | Concept layer (indkomstkategori spine) | Asserts tax doctrine — user must expert-review seed edges; build as on-demand tool only |
 | Qwen3-30B model swap | Postponed; C4 (its blocker) is now concluded |
 | Flash-3.5 control/treatment runs | User schedules; costs API money |
