@@ -1790,6 +1790,57 @@ def scope_flag(verdict: dict) -> Optional[str]:
     return next((f for f in SCOPE_FLAGS if verdict.get(f)), None)
 
 
+# ── Token cost (single source, 2026-08-08) ───────────────────────────────────
+# USD per 1M tokens. THE authoritative table: server.py serves it to the frontend
+# via /api/architecture so the UI never carries its own copy (the previous
+# hardcoded table in events.ts had drifted to 2.5-era ids). Prices are public
+# list prices for an order-of-magnitude "hvad koster det"-signal, NOT billing.
+# Local Ollama has no marginal cost → None, rendered as "lokal".
+# Longest match wins, so gemini-3.5-flash-lite beats gemini-3.5-flash.
+PRICE_USD_PER_MTOK: list[dict] = [
+    {"match": "gemini-3.5-flash-lite", "in": 0.10, "out": 0.40},
+    {"match": "gemini-3.5-flash", "in": 0.30, "out": 2.50},
+    {"match": "gemini-3.1-pro", "in": 1.25, "out": 10.00},
+    {"match": "gemini-3-pro", "in": 1.25, "out": 10.00},
+    {"match": "gemini-3-flash", "in": 0.30, "out": 2.50},
+    {"match": "gemini-2.5-flash", "in": 0.30, "out": 2.50},
+    {"match": "gemini-2.5-pro", "in": 1.25, "out": 10.00},
+    {"match": "gpt-4o-mini", "in": 0.15, "out": 0.60},
+]
+USD_TO_DKK = 6.9
+
+
+def cost_dkk(provider: str, in_tokens: int, out_tokens: int) -> Optional[float]:
+    """Approximate DKK cost of one call/run. None for local models (no marginal
+    cost) and for unknown providers — a wrong number is worse than no number."""
+    if not provider or provider.startswith("ollama"):
+        return None
+    row = max((r for r in PRICE_USD_PER_MTOK if r["match"] in provider),
+              key=lambda r: len(r["match"]), default=None)
+    if row is None:
+        return None
+    usd = (in_tokens * row["in"] + out_tokens * row["out"]) / 1e6
+    return round(usd * USD_TO_DKK, 4)
+
+
+def token_usage(tool_events: list[dict]) -> dict:
+    """Roll up token usage + cost from a run's llm_call events.
+
+    Kept next to the pricing table so every persistence path (eval records,
+    eval_log.jsonl, mr_runs, the SSE done event) reports the same shape:
+    {input_tokens, output_tokens, llm_calls, cost_dkk}.
+    """
+    llm = [e for e in (tool_events or []) if e.get("type") == "llm_call"]
+    tin = sum(int(e.get("input_tokens") or 0) for e in llm)
+    tout = sum(int(e.get("output_tokens") or 0) for e in llm)
+    return {
+        "input_tokens": tin,
+        "output_tokens": tout,
+        "llm_calls": len(llm),
+        "cost_dkk": cost_dkk(resolve_llm_provider() or "", tin, tout),
+    }
+
+
 REDACTED_PII = "[REDACTED-PII]"
 
 
@@ -1997,6 +2048,9 @@ def log_trajectory(question: str, answer: str, tool_events: list[dict], total_la
         "total_latency_s": round(total_latency_s, 3),
         "step_count": len(tool_calls),
         "tool_sequence": [e["tool_name"] for e in tool_calls],
+        # tokens + cost travel with every trajectory (2026-08-08): the run's
+        # price is as much a property of it as its latency.
+        "usage": token_usage(tool_events),
         "tool_durations": {
             e["tool_name"]: e.get("duration_s")
             for e in tool_events

@@ -47,23 +47,57 @@ export type AgentEvent =
   | { type: "scope_gate_error"; elapsed_s: number; node?: string; reason: string }
   | { type: "citations"; items: Citation[] }
   | { type: "answer"; text: string }
-  | { type: "done"; run_id?: string; latency_s: number; input_tokens?: number; output_tokens?: number }
+  | {
+      type: "done";
+      run_id?: string;
+      latency_s: number;
+      input_tokens?: number;
+      output_tokens?: number;
+      llm_calls?: number;
+      cost_dkk?: number | null;
+    }
   | { type: "error"; message: string };
 
-// ── Token cost (Feedback-round-1 #4) ─────────────────────────────────────────
-// USD per 1M tokens; local Ollama has no marginal cost. Rough public list
-// prices — for a "hvad koster det"-signal in the UI, not billing.
-const PRICE_USD: { match: string; in: number; out: number }[] = [
+// ── Token cost ───────────────────────────────────────────────────────────────
+// The authoritative price table lives in app.py and arrives via
+// /api/architecture; `setPricing` installs it at startup. The literals below are
+// only a bootstrap fallback for the first paint and for the offline replay
+// tests. Keeping the real numbers server-side is deliberate: the previous
+// hardcoded table here had drifted to 2.5-era ids while the agent ran on 3.5, so
+// every cost shown in the UI was quietly wrong.
+export interface PriceRow {
+  match: string;
+  in: number;
+  out: number;
+}
+// Mirrors app.py's table. The 2.5-era ids stay listed: those models are still
+// alive and every historical eval cell ran on them, so their runs must still
+// price correctly when replayed.
+let PRICE_USD: PriceRow[] = [
+  { match: "gemini-3.5-flash-lite", in: 0.1, out: 0.4 },
+  { match: "gemini-3.5-flash", in: 0.3, out: 2.5 },
+  { match: "gemini-3.1-pro", in: 1.25, out: 10 },
+  { match: "gemini-3-pro", in: 1.25, out: 10 },
+  { match: "gemini-3-flash", in: 0.3, out: 2.5 },
   { match: "gemini-2.5-flash", in: 0.3, out: 2.5 },
   { match: "gemini-2.5-pro", in: 1.25, out: 10 },
-  { match: "gemini-3", in: 0.5, out: 4 },
   { match: "gpt-4o-mini", in: 0.15, out: 0.6 },
 ];
-const USD_TO_DKK = 6.9;
+let USD_TO_DKK = 6.9;
 
+export function setPricing(rows: PriceRow[] | undefined, usdToDkk?: number): void {
+  if (rows && rows.length) PRICE_USD = rows;
+  if (typeof usdToDkk === "number" && usdToDkk > 0) USD_TO_DKK = usdToDkk;
+}
+
+/** Approximate DKK cost. null = local model (no marginal cost) or unknown
+ *  provider — showing nothing beats showing a wrong number. Longest match wins
+ *  so `-flash-lite` is not priced as `-flash`. */
 export function costKr(provider: string, inTok: number, outTok: number): number | null {
-  if (!provider || provider.startsWith("ollama")) return null; // local = free
-  const row = PRICE_USD.find((p) => provider.includes(p.match)) ?? PRICE_USD[0];
+  if (!provider || provider.startsWith("ollama")) return null;
+  const matches = PRICE_USD.filter((p) => provider.includes(p.match));
+  if (matches.length === 0) return null;
+  const row = matches.reduce((a, b) => (b.match.length > a.match.length ? b : a));
   return ((inTok * row.in + outTok * row.out) / 1e6) * USD_TO_DKK;
 }
 
@@ -71,6 +105,15 @@ export function formatKr(kr: number): string {
   if (kr < 0.01) return "<0,01 kr.";
   return `~${kr.toFixed(2).replace(".", ",")} kr.`;
 }
+
+/** Cost label for a token pair, ready to render next to the token counts.
+ *  Single helper so every site shows cost the same way. */
+export function costLabel(provider: string, inTok: number, outTok: number): string {
+  const kr = costKr(provider, inTok, outTok);
+  return kr == null ? "lokal" : formatKr(kr);
+}
+
+export const fmtTok = (n: number): string => n.toLocaleString("da-DK");
 
 export const SCOPE_FLAG_LABELS: Record<string, string> = {
   pii: "Personoplysninger",
@@ -228,7 +271,14 @@ export function captionSteps(log: AgentEvent[]): CaptionStep[] {
         text: `Skjoldet blokerede spørgsmålet — ${SCOPE_FLAG_LABELS[ev.flag] ?? ev.flag}`,
       });
     } else if (ev.type === "done") {
-      steps.push({ t: ev.latency_s * 1000, text: `Færdig · ${ev.latency_s.toFixed(1).replace(".", ",")} s` });
+      // The run's price belongs next to its duration — the done event carries
+      // server-computed tokens + cost, so no provider lookup is needed here.
+      const tok = (ev.input_tokens ?? 0) + (ev.output_tokens ?? 0);
+      const bits = [`Færdig · ${ev.latency_s.toFixed(1).replace(".", ",")} s`];
+      if (tok > 0) bits.push(`${fmtTok(tok)} tok`);
+      if (ev.cost_dkk != null) bits.push(formatKr(ev.cost_dkk));
+      else if (tok > 0) bits.push("lokal");
+      steps.push({ t: ev.latency_s * 1000, text: bits.join(" · ") });
     }
   }
   steps.sort((a, b) => a.t - b.t);

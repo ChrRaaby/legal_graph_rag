@@ -7,7 +7,7 @@
 //         --platform=node --outfile=/tmp/replay.mjs && node /tmp/replay.mjs
 import {
   spansFromLog, runEndMs, captionAt, liveMaxMs,
-  costKr, reconstructContext, scopeGate,
+  costKr, reconstructContext, scopeGate, setPricing,
 } from "../src/lib/events";
 import type { AgentEvent } from "../src/lib/events";
 import { buildCircuit, circuitOn } from "../src/lib/circuit";
@@ -114,6 +114,36 @@ check("run_start carries run_id", !!runStart.run_id);
 // cost: hosted provider yields a positive kr; local is null
 check("costKr hosted > 0", (costKr("gemini:gemini-2.5-flash", 10000, 1000) ?? 0) > 0);
 check("costKr local is null", costKr("ollama", 10000, 1000) === null);
+check("costKr unknown provider is null (never a fake 0)",
+  costKr("some-unlisted-model", 10000, 1000) === null);
+// longest-match: flash-lite must not be priced as flash
+check("costKr prices flash-lite below flash",
+  (costKr("gemini:gemini-3.5-flash-lite", 1e6, 1e6) ?? 9e9) <
+  (costKr("gemini:gemini-3.5-flash", 1e6, 1e6) ?? 0));
+// server-supplied pricing overrides the bootstrap table
+setPricing([{ match: "test-model", in: 1000, out: 1000 }], 1);
+check("setPricing installs server rates",
+  Math.round(costKr("test-model", 1e6, 0) ?? 0) === 1000);
+setPricing([
+  { match: "gemini-3.5-flash-lite", in: 0.1, out: 0.4 },
+  { match: "gemini-3.5-flash", in: 0.3, out: 2.5 },
+  { match: "gemini-2.5-flash", in: 0.3, out: 2.5 },
+], 6.9);
+
+// The done caption carries the run's price next to its duration.
+const pricedDone = [
+  { type: "done", run_id: "p1", latency_s: 4.2, input_tokens: 12000,
+    output_tokens: 400, llm_calls: 2, cost_dkk: 0.031 },
+] as unknown as AgentEvent[];
+check("done caption shows tokens and cost",
+  /12\.400 tok/.test(captionAt(pricedDone, 5000, false)) &&
+  /kr\./.test(captionAt(pricedDone, 5000, false)),
+  captionAt(pricedDone, 5000, false));
+const localDone = [
+  { type: "done", run_id: "p2", latency_s: 3, input_tokens: 900, output_tokens: 50, cost_dkk: null },
+] as unknown as AgentEvent[];
+check("done caption says lokal when cost is unknown/local",
+  /lokal/.test(captionAt(localDone, 4000, false)), captionAt(localDone, 4000, false));
 
 // context reconstruction: the final llm call sees the preceding tool outputs
 const lastLlmIdx = log.map((e, i) => (e.type === "llm" ? i : -1)).filter((i) => i >= 0).at(-1)!;

@@ -104,6 +104,25 @@ imported by eval_run. Proven a pure refactor — pre- vs post-refactor scorer:
 Verified: 30 offline checks, API smoke, end-to-end runner smoke, 50 replay
 assertions, Playwright green, CLI unchanged, real-data eyeball. Backlog Phase E.
 
+☑ **Feedback round 1 (user, 2026-08-08) implemented:**
+1. **Eval tab split into sub-tabs** — *Testsuite* (browse the set + run a smoke)
+   and *Historik* (past runs, matrix, items, fixtures, tool health). They were one
+   long scroll that buried the history under the browser.
+2. **Tools, tokens and cost in the test log and UI** — eval records, trajectories,
+   smoke verdicts and run summaries now carry a `usage` block
+   (`input_tokens / output_tokens / llm_calls / cost_dkk`), and `scores` already
+   carried `tool_sequence`. Shown per item, per verdict and as run tiles.
+3. **Cost beside tokens everywhere** — `/api/ask` done event, run tiles, item
+   drill-down, smoke verdicts, Tankestrøm LLM cards, and the run caption.
+   ⚠ Pricing is now single-sourced in `app.py` and served via
+   `/api/architecture`; the frontend's own table had **drifted to 2.5-era ids
+   while the agent ran on 3.5**, so every cost shown was quietly wrong. Unknown
+   provider → `null`, never a fake 0. Pre-2026-08-08 result files report
+   `usage: null` ("not recorded"), never 0.
+   **Not done deliberately:** the legacy Streamlit UI's token metrics
+   (app.py ~2430/2509/2575/2780) were left alone — that UI is retired doc-level
+   (Phase E) and the backlog forbids building there.
+
 ☑ Residual closed 2026-08-08: fixture records now carry a **classifier-model /
 git_sha / set_version / ts stamp** (E0 lesson — the classifier is swappable, so an
 unstamped baseline can't be compared), and `GET /api/eval/fixtures` + a

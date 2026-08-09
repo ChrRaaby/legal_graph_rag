@@ -3,6 +3,7 @@
 // a ReadableStream reader rather than EventSource (which is GET-only).
 
 import type { AgentEvent, GraphRef } from "./events";
+import { setPricing } from "./events";
 export type { AgentEvent } from "./events";
 
 export interface ToolInfo {
@@ -86,6 +87,8 @@ export interface EvalRun {
     tags?: EvalDimRow[];
   };
   gated?: number; // records answered by the F1 scope gate
+  usage?: Usage | null; // null for files written before usage was recorded
+  tool_calls?: number;
 }
 export interface EvalItem {
   id: string;
@@ -97,6 +100,9 @@ export interface EvalItem {
   passes: number;
   answer: string;
   gate_flag?: string | null; // "pii" | "illegal" | "non_tax" when gate-answered
+  usage?: Usage | null;
+  latency_s?: number;
+  tool_sequence?: string[];
   scores: {
     must_contain: boolean;
     must_not_contain: boolean;
@@ -140,6 +146,8 @@ export interface EvalRunVerdict {
   latency_s: number;
   answer: string;
   gate_flag: string | null;
+  usage?: Usage;
+  tool_sequence?: string[];
   scores: {
     overall_pass: boolean;
     must_contain_pass: boolean;
@@ -163,6 +171,15 @@ export interface Architecture {
   provider: string;
   graph_stats: { legislation: number; sections: number; error?: string };
   tools: ToolInfo[];
+  // Server-supplied price table (app.py is the single source).
+  pricing?: { usd_per_mtok: import("./events").PriceRow[]; usd_to_dkk: number };
+}
+export interface Usage {
+  input_tokens: number;
+  output_tokens: number;
+  llm_calls: number;
+  cost_dkk: number | null;
+  coverage?: string;
 }
 export interface ChatMessage {
   role: "user" | "assistant";
@@ -172,7 +189,10 @@ export interface ChatMessage {
 export async function fetchArchitecture(): Promise<Architecture> {
   const res = await fetch("/api/architecture");
   if (!res.ok) throw new Error(`architecture ${res.status}`);
-  return (await res.json()) as Architecture;
+  const arch = (await res.json()) as Architecture;
+  // Install the server's price table before anything renders a cost.
+  setPricing(arch.pricing?.usd_per_mtok, arch.pricing?.usd_to_dkk);
+  return arch;
 }
 
 export async function fetchSubgraph(refs: GraphRef[], answer: string): Promise<Subgraph> {

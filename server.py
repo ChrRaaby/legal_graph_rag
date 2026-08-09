@@ -53,7 +53,10 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 sys.path.insert(0, str(Path(__file__).parent))
 import app as agent_app  # noqa: E402  (triggers one import-time build_runtime)
-from app import build_runtime, stream_agent_answer, resolve_llm_provider, redact_if_pii  # noqa: E402
+from app import (  # noqa: E402
+    build_runtime, stream_agent_answer, resolve_llm_provider, redact_if_pii,
+    token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK,
+)
 
 from fastapi import FastAPI, Request  # noqa: E402
 from fastapi.responses import StreamingResponse, JSONResponse, FileResponse  # noqa: E402
@@ -149,6 +152,10 @@ def _architecture() -> dict:
         "provider": PROVIDER,
         "graph_stats": _graph_stats(),
         "tools": [{"name": t.name, "description": (t.description or "")} for t in AGENT_TOOLS],
+        # Pricing is served from app.py's single table so the UI never carries
+        # its own copy — the old hardcoded one in events.ts had already drifted
+        # to 2.5-era model ids while the agent ran on 3.5.
+        "pricing": {"usd_per_mtok": PRICE_USD_PER_MTOK, "usd_to_dkk": USD_TO_DKK},
     }
 
 
@@ -507,11 +514,9 @@ def _run_events(messages: list[dict]):
             )
             for ev in tool_events[sent:]:
                 q.put(("event", ev))
-            totals = {"input_tokens": 0, "output_tokens": 0}
-            for ev in tool_events:
-                if ev.get("type") == "llm_call":
-                    totals["input_tokens"] += int(ev.get("input_tokens") or 0)
-                    totals["output_tokens"] += int(ev.get("output_tokens") or 0)
+            # token_usage() is the single roll-up shape, so the done event
+            # carries cost alongside tokens like every other path.
+            totals = token_usage(tool_events)
             q.put(("citations", resolve_citations(answer)))
             q.put(("answer", answer))
             q.put(("done", {"latency_s": round(time.perf_counter() - t0, 3), **totals}))
@@ -780,6 +785,26 @@ def _scan_eval_file(path: Path) -> dict | None:
 
     gated = sum(1 for r in records if _gate_flag(r.get("answer", "")))
 
+    # Usage roll-up. Records written before 2026-08-08 have no `usage` block, so
+    # report None rather than 0 — "we don't know" and "it was free" are different
+    # claims, and a silent 0 would understate historical run costs.
+    usage_recs = [r["usage"] for r in records if isinstance(r.get("usage"), dict)]
+    if usage_recs:
+        tin = sum(int(u.get("input_tokens") or 0) for u in usage_recs)
+        tout = sum(int(u.get("output_tokens") or 0) for u in usage_recs)
+        costs = [u.get("cost_dkk") for u in usage_recs if u.get("cost_dkk") is not None]
+        usage = {
+            "input_tokens": tin,
+            "output_tokens": tout,
+            "llm_calls": sum(int(u.get("llm_calls") or 0) for u in usage_recs),
+            "cost_dkk": round(sum(costs), 4) if costs else None,
+            "coverage": f"{len(usage_recs)}/{len(records)}",
+        }
+    else:
+        usage = None
+    tool_calls_total = sum(int((r.get("scores") or {}).get("tool_call_count") or 0)
+                           for r in records)
+
     ts = first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
     return {
         "name": path.name,
@@ -794,6 +819,8 @@ def _scan_eval_file(path: Path) -> dict | None:
         "pass_pct": round(100 * passes / len(records)) if records else 0,
         "dims": dims,
         "gated": gated,          # records answered by the F1 scope gate
+        "usage": usage,          # tokens + cost; None for pre-2026-08-08 files
+        "tool_calls": tool_calls_total,
     }
 
 
@@ -841,7 +868,10 @@ def eval_run_items(name: str):
             e["passes"] += 1
         e["answer"] = r.get("answer", "")
         e["gate_flag"] = _gate_flag(r.get("answer", ""))   # E4: mark gated rows
+        e["usage"] = r.get("usage")                        # tokens + cost (may be None)
+        e["latency_s"] = r.get("latency_s")
         sc = r["scores"]
+        e["tool_sequence"] = sc.get("tool_sequence") or []
         e["scores"] = {
             "must_contain": sc.get("must_contain_pass"), "must_not_contain": sc.get("must_not_contain_pass"),
             "behavior": sc.get("behavior_match"), "citation": sc.get("citation_pass"),
@@ -1072,6 +1102,8 @@ def _eval_run_events(items: list[dict]):
         yield _sse({"type": "eval_item", "index": n, "total": len(items),
                     "id": item["id"], "run_id": run_id, "latency_s": latency,
                     "answer": answer, "scores": scores,
+                    "usage": token_usage(tool_events),
+                    "tool_sequence": scores.get("tool_sequence", []),
                     "gate_flag": _gate_flag(answer)})
 
     yield _sse({"type": "eval_done", "total": len(items)})

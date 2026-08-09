@@ -88,6 +88,7 @@ from app import (  # noqa: E402,F401
     BEHAVIOR_SIGNALS, BEHAVIOR_PRIORITY, SUBSTANTIVE_BEHAVIORS,
     _normalize, _term_label, _term_present,
     detect_behavior, behavior_matches, score_item,
+    token_usage, cost_dkk,
 )
 
 
@@ -672,6 +673,12 @@ def main() -> None:
             "scores": scores, "run_idx": _run_state["idx"],
             "git_sha": run_git_sha, "provider": run_provider,
             "set_version": run_set_version,
+            # Tokens + cost per item (2026-08-08). Previously an eval record said
+            # what an item scored but never what it COST — so the price of a run
+            # could not be reconstructed afterwards. `scores` already carries
+            # tool_call_count/tool_sequence, so tools + tokens + cost are now all
+            # queryable per item.
+            "usage": token_usage(tool_events),
             "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
         }
 

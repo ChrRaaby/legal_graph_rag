@@ -50,14 +50,25 @@ test("live run, lenses, kilder, feedback", async ({ page }) => {
   await expect(page.locator(".th .meta").first()).toBeVisible();
   await expect(page.locator(".th details summary").first()).toBeVisible();
 
-  // Eval lens: dimension matrix + items table + tool-health render from real data.
+  // Eval lens opens on the Testsuite sub-tab; Historik holds the run views.
   await page.locator(".tab", { hasText: "Eval" }).click();
+  await expect(page.locator(".subtab", { hasText: "Testsuite" })).toHaveAttribute("aria-selected", "true");
+  await expect(page.locator(".dimtable.golden")).toBeVisible();
+  // The run selector belongs to Historik, so it must NOT be on the suite tab.
+  await expect(page.locator(".eval-selects")).toHaveCount(0);
+
+  await page.locator(".subtab", { hasText: "Historik" }).click();
   await expect(page.locator(".eval-selects select").first()).toBeVisible();
   await expect(page.locator(".dimtable .etbl tbody tr").first()).toBeVisible();
   await expect(page.locator(".etbl.items .item-row").first()).toBeVisible({ timeout: 15_000 });
   await expect(page.getByText("Værktøjs-sundhed")).toBeVisible();
+  // Cost is shown alongside tokens on the run tiles.
+  await expect(page.locator(".tiles")).toContainText(/tokens|forbrug/);
+  // The golden browser lives on the suite tab only.
+  await expect(page.locator(".dimtable.golden")).toHaveCount(0);
 
-  // ── E4: golden-set browser ───────────────────────────────────────────────
+  // ── E4: golden-set browser (back on Testsuite) ───────────────────────────
+  await page.locator(".subtab", { hasText: "Testsuite" }).click();
   const golden = page.locator(".dimtable.golden");
   await expect(golden).toBeVisible();
   await expect(golden.locator("h5")).toContainText("Golden set");
@@ -91,6 +102,9 @@ test("live run, lenses, kilder, feedback", async ({ page }) => {
   await expect(page.locator(".verdict").first()).toBeVisible({ timeout: 90_000 });
   await expect(page.locator(".verdict").first()).toHaveClass(/ok/);
   await expect(page.locator(".verdict .gatebadge").first()).toBeVisible();
+  // Tokens + cost ride along with the verdict (a gated item costs one
+  // classifier call, so "lokal" or a kr. figure — never a blank).
+  await expect(page.locator(".verdict .vhead")).toContainText(/tok|forbrug/);
 
   expect(errors, "no uncaught page errors").toEqual([]);
 });

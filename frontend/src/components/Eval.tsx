@@ -4,8 +4,25 @@ import {
   fetchScopeFixtures,
   type EvalRun, type EvalItem, type ToolHealthRow,
   type GoldenSet, type GoldenItem, type EvalRunVerdict, type ScopeFixture,
+  type Usage,
 } from "../lib/api";
-import { SCOPE_FLAG_LABELS } from "../lib/events";
+import { SCOPE_FLAG_LABELS, formatKr, fmtTok, toolLabel } from "../lib/events";
+
+/** Tokens + cost, rendered identically wherever usage appears. `null` cost means
+ *  a local model (no marginal cost) or an unknown provider — never a fake 0. */
+function UsageBits({ usage }: { usage?: Usage | null }) {
+  if (!usage) return <span className="det">forbrug ikke registreret</span>;
+  return (
+    <>
+      <span className="det">ind {fmtTok(usage.input_tokens)} tok</span>
+      <span className="det">ud {fmtTok(usage.output_tokens)} tok</span>
+      <span className="det kr">
+        {usage.cost_dkk == null ? "lokal" : formatKr(usage.cost_dkk)}
+      </span>
+      {usage.llm_calls > 0 && <span className="det">{usage.llm_calls} LLM-kald</span>}
+    </>
+  );
+}
 
 const pct = (r: { pass: number; total: number }) => (r.total ? Math.round((100 * r.pass) / r.total) : 0);
 const shortDate = (ts: string) => (ts || "").slice(0, 10);
@@ -117,6 +134,19 @@ function ItemsTable({ name }: { name: string }) {
                         </span>
                       )}
                     </div>
+                    <div className="id-checks">
+                      <UsageBits usage={it.usage} />
+                      {it.latency_s != null && (
+                        <span className="det">{it.latency_s.toFixed(1).replace(".", ",")} s</span>
+                      )}
+                    </div>
+                    {(it.tool_sequence?.length ?? 0) > 0 && (
+                      <div className="gtags">
+                        {it.tool_sequence!.map((t, i) => (
+                          <span key={`${t}-${i}`} className="gtag">{toolLabel(t)}</span>
+                        ))}
+                      </div>
+                    )}
                     <details><summary>Sidste svar</summary><pre>{it.answer || "(intet)"}</pre></details>
                   </td>
                 </tr>
@@ -146,9 +176,10 @@ function termList(terms: (string | string[])[]): string {
   return terms.map((t) => (Array.isArray(t) ? t.join(" | ") : t)).join(" · ");
 }
 
-function GoldenBrowser({ onRun, running }: {
+function GoldenBrowser({ onRun, running, onLoaded }: {
   onRun: (ids: string[]) => void;
   running: boolean;
+  onLoaded?: (g: GoldenSet) => void;
 }) {
   const [data, setData] = useState<GoldenSet | null>(null);
   const [q, setQ] = useState("");
@@ -160,7 +191,9 @@ function GoldenBrowser({ onRun, running }: {
 
   useEffect(() => {
     const id = setTimeout(() => {
-      fetchGolden({ q, dim, value }).then(setData).catch((e) => setErr(String(e)));
+      fetchGolden({ q, dim, value })
+        .then((g) => { setData(g); onLoaded?.(g); })
+        .catch((e) => setErr(String(e)));
     }, 200);
     return () => clearTimeout(id);
   }, [q, dim, value]);
@@ -287,8 +320,15 @@ function RunnerPanel({ progress, verdicts, error }: {
               <span className="gatebadge">🛡 {SCOPE_FLAG_LABELS[v.gate_flag] ?? v.gate_flag}</span>
             )}
             <span className="det">{v.latency_s.toFixed(1).replace(".", ",")} s</span>
-            <span className="det">{v.scores.tool_call_count ?? 0} værktøjskald</span>
+            <UsageBits usage={v.usage} />
           </div>
+          {(v.tool_sequence?.length ?? 0) > 0 && (
+            <div className="gtags">
+              {v.tool_sequence!.map((t, i) => (
+                <span key={`${t}-${i}`} className="gtag">{toolLabel(t)}</span>
+              ))}
+            </div>
+          )}
           <div className="id-checks">
             {([
               ["must_contain", v.scores.must_contain_pass],
@@ -385,6 +425,8 @@ export default function Eval() {
   const [primaryName, setPrimaryName] = useState<string>("");
   const [compareName, setCompareName] = useState<string>("");
   const [error, setError] = useState<string | null>(null);
+  const [sub, setSub] = useState<"suite" | "history">("suite");
+  const [golden, setGolden] = useState<GoldenSet | null>(null);
   // E4 smoke runner
   const [running, setRunning] = useState(false);
   const [progress, setProgress] = useState("");
@@ -439,26 +481,50 @@ export default function Eval() {
   if (error) return <div className="placeholder"><div>Kunne ikke indlæse eval-data: {error}</div></div>;
   if (!runs) return <div className="placeholder"><span className="dot" /><div>Indlæser eval-kørsler …</div></div>;
 
-  // The golden browser + runner work even with zero result files, so they are
-  // rendered before the run-dependent views bail out.
-  const browser = (
-    <>
-      <GoldenBrowser onRun={runSmoke} running={running} />
-      <RunnerPanel progress={progress} verdicts={verdicts} error={runErr} />
-    </>
+  // Two distinct jobs, so two sub-tabs: TESTSUITE is "what do we test, and run
+  // one now"; HISTORIK is "what happened when we ran it". They previously shared
+  // one long scroll, which buried the history under the browser.
+  const subtabs = (
+    <div className="subtabs" role="tablist" aria-label="Eval-visning">
+      {([
+        ["suite", `Testsuite${golden ? ` · ${golden.total}` : ""}`],
+        ["history", `Historik · ${runs.length}`],
+      ] as const).map(([key, label]) => (
+        <button
+          key={key}
+          role="tab"
+          aria-selected={sub === key}
+          className={`subtab ${sub === key ? "on" : ""}`}
+          onClick={() => setSub(key)}
+        >
+          {label}
+        </button>
+      ))}
+    </div>
   );
+
+  if (sub === "suite") {
+    return (
+      <div className="eval">
+        {subtabs}
+        <GoldenBrowser onRun={runSmoke} running={running} onLoaded={setGolden} />
+        <RunnerPanel progress={progress} verdicts={verdicts} error={runErr} />
+      </div>
+    );
+  }
+
   if (runs.length === 0) {
     return (
       <div className="eval">
-        {browser}
-        <div className="note">Ingen eval-kørsler fundet (eval_results_*.jsonl) — kør en smoke ovenfor.</div>
+        {subtabs}
+        <div className="note">Ingen eval-kørsler fundet (eval_results_*.jsonl) — kør en smoke under Testsuite.</div>
       </div>
     );
   }
 
   return (
     <div className="eval">
-      {browser}
+      {subtabs}
       <div className="eval-selects">
         <label>Kørsel
           <select value={primaryName} onChange={(e) => setPrimaryName(e.target.value)}>
@@ -482,6 +548,33 @@ export default function Eval() {
             <div className="tile"><div className="v mono">{primary.git_sha}</div><div className="k">app-commit · {shortDate(primary.ts)}</div></div>
             {primary.gated != null && primary.gated > 0 && (
               <div className="tile"><div className="v">🛡 {primary.gated}</div><div className="k">besvaret af skjoldet</div></div>
+            )}
+            {primary.tool_calls != null && (
+              <div className="tile"><div className="v">{fmtTok(primary.tool_calls)}</div><div className="k">værktøjskald i alt</div></div>
+            )}
+            {primary.usage ? (
+              <>
+                <div className="tile">
+                  <div className="v">{fmtTok(primary.usage.input_tokens + primary.usage.output_tokens)}</div>
+                  <div className="k">
+                    tokens · ind {fmtTok(primary.usage.input_tokens)} / ud {fmtTok(primary.usage.output_tokens)}
+                  </div>
+                </div>
+                <div className="tile">
+                  <div className="v kr">
+                    {primary.usage.cost_dkk == null ? "lokal" : formatKr(primary.usage.cost_dkk)}
+                  </div>
+                  <div className="k">
+                    anslået pris{primary.usage.coverage && primary.usage.coverage !== `${primary.n_records}/${primary.n_records}`
+                      ? ` · ${primary.usage.coverage} records` : ""}
+                  </div>
+                </div>
+              </>
+            ) : (
+              <div className="tile">
+                <div className="v sub">—</div>
+                <div className="k">forbrug ikke registreret i denne fil</div>
+              </div>
             )}
           </div>
 
