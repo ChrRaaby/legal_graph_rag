@@ -256,10 +256,10 @@ Scope decisions to respect:
   elsewhere, which touches the recall gap above. Likely a stray seed entry in
   `danish_tax_legislation.txt` or a crawl artifact. **Investigate, then decide whether to
   remove** — removal is a graph change and therefore agent-visible.
-- ☐ **README.md is stale on three counts**: says "13 StructuredTools" and lists
-  `Semantic_Search` / `Citation_Counts` / `Text2Cypher_Expert` (all pruned by C3 →
-  12 tools); presents Streamlit as the product (Maskinrummet is primary per CLAUDE.md);
-  law table predates BAL and PBL.
+- ☑ **README.md corrected** 2026-08-08 (all three counts): tool table now 12 with a
+  note on the C3-pruned three; architecture diagram shows Maskinrummet + the scope
+  gate instead of Streamlit; law table gained BAL and PBL; the observability section
+  describes the real lenses. CLAUDE.md updated in the same pass.
 - ☐ **`environment.yml` has drifted** from the real environment: pins python 3.11 (the
   working `.venv` is 3.13), and omits `fastapi`/`uvicorn` — anyone rebuilding from it
   gets an env that can't run `server.py`.
@@ -275,9 +275,14 @@ Scope decisions to respect:
 
 ## Deferred refactors
 
-- ☐ **Remove the Streamlit UI from `app.py`** — slim it to the runtime while keeping the
-  stub-import working for `server.py`/`eval_run.py`. Careful, Opus-lane: module-level
-  `st.*` is load-bearing.
+- ☑ **Streamlit UI removed** 2026-08-08 (user request). app.py is pure runtime,
+  **3556 → 2166 lines**; the `sys.modules` stubs are gone from all four importers;
+  streamlit/altair/pandas/neo4j_viz dropped as dependencies. Verified by importing
+  app with `streamlit` poisoned in `sys.modules`. Backlog Phase E.
+- ☑ **Workspace cleaned** 2026-08-08: eval artefacts live in **`eval_history/`**
+  (56 run outputs + 2 baselines + 15 logs). Relative `--output` names resolve
+  there; absolute paths pass through. Readers fall back to the root for older
+  checkouts. See `eval_history/README.md`.
 - ☐ **Graflinsen edge routing** — CITES edges spanning law-columns pass visually over
   intermediate nodes. A real graph-layout problem (arc-bundling / elkjs / waypoints),
   flagged as Fable-lane design work.

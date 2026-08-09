@@ -50,7 +50,7 @@ assert old.score_item is not app.score_item, "did not actually load the old copy
 
 pairs = 0
 diffs = 0
-for p in sorted(REPO.glob("eval_results_*.jsonl")):
+for p in sorted((REPO / "eval_history").glob("eval_results_*.jsonl")):
     for line in p.read_text(encoding="utf-8").splitlines():
         if not line.strip():
             continue
@@ -72,7 +72,7 @@ for p in sorted(REPO.glob("eval_results_*.jsonl")):
 
 # also exercise behaviour detection over every distinct answer
 answers = set()
-for p in REPO.glob("eval_results_*.jsonl"):
+for p in (REPO / "eval_history").glob("eval_results_*.jsonl"):
     for line in p.read_text(encoding="utf-8").splitlines():
         if line.strip():
             try:

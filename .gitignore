@@ -18,3 +18,13 @@ eval_results_*.jsonl
 *.bak
 eval_*.log
 overnight_*.log
+
+# eval artefacts now live in eval_history/ (2026-08-08). Run outputs and logs
+# are ignored; the two fixture BASELINES in there are tracked on purpose, so
+# they are re-included below.
+eval_history/*.jsonl
+eval_history/*.json
+eval_history/*.log
+!eval_history/eval_fixtures_baseline.jsonl
+!eval_history/eval_fixtures_scope_baseline.jsonl
+!eval_history/README.md

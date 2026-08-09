@@ -56,7 +56,7 @@ def main() -> int:
     ap.add_argument("--limit", type=int, default=15)
     args = ap.parse_args()
 
-    import eval_run  # stubs streamlit, imports app
+    import eval_run  # imports app (pure runtime)
 
     golden = json.loads(Path(args.golden_set).read_text(encoding="utf-8"))
     items = golden.get("items", golden) if isinstance(golden, dict) else golden

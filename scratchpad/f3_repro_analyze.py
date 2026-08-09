@@ -18,9 +18,9 @@ def load(p):
     return {json.loads(l)["item"]["id"]: json.loads(l)
             for l in open(p, encoding="utf-8") if l.strip()}
 
-a = load("eval_results_f3_repro_off1.jsonl")
-b = load("eval_results_f3_repro_off2.jsonl")
-old = load("eval_results_f3_gemma_v42_off.jsonl")
+a = load("eval_history/eval_results_f3_repro_off1.jsonl")
+b = load("eval_history/eval_results_f3_repro_off2.jsonl")
+old = load("eval_history/eval_results_f3_gemma_v42_off.jsonl")
 
 ids = sorted(set(a) & set(b), key=lambda s: int(s.split("-")[1]))
 norm = lambda s: " ".join((s or "").split())

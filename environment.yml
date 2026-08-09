@@ -27,4 +27,3 @@ dependencies:
     - langchain-openai
     - langchain-huggingface
     - langgraph
-    - streamlit

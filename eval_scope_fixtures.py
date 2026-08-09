@@ -23,24 +23,18 @@ import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from unittest.mock import MagicMock
 
 REPO = Path(__file__).parent
 sys.path.insert(0, str(REPO))
 
-# Stub streamlit before importing app (same pattern as eval_run.py).
-_st = MagicMock()
-_st.cache_resource = lambda **kwargs: (lambda f: f)
-_st.columns = lambda spec, **kw: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
-_st.stop = lambda: sys.exit("Neo4j initialization failed")
-sys.modules.update({
-    "streamlit": _st, "streamlit.components": _st, "streamlit.components.v1": _st,
-})
+# app.py is pure runtime since 2026-08-08 — no Streamlit stub needed.
 
 import logging  # noqa: E402
 logging.getLogger("neo4j").setLevel(logging.ERROR)
 
-from app import classify_request, scope_flag, SCOPE_CLASSIFIER_MODEL  # noqa: E402
+from app import (  # noqa: E402
+    classify_request, scope_flag, SCOPE_CLASSIFIER_MODEL, eval_artifact_path,
+)
 
 
 def _git_sha() -> str:
@@ -153,10 +147,11 @@ def main() -> int:
     print("=" * 62)
 
     if args.output:
-        with open(args.output, "w", encoding="utf-8") as f:
+        out = eval_artifact_path(args.output)   # relative names → eval_history/
+        with open(out, "w", encoding="utf-8") as f:
             for r in results:
                 f.write(json.dumps(r, ensure_ascii=False) + "\n")
-        print(f"  written to {args.output}")
+        print(f"  written to {out}")
 
     return 1 if failures else 0
 

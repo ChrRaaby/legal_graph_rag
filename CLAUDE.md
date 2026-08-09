@@ -12,17 +12,21 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 A Neo4j knowledge graph of Danish tax legislation sourced from [retsinformation.dk](https://www.retsinformation.dk/) (XML format via the ELI URI scheme). The primary objective is GraphRAG (Graph Retrieval-Augmented Generation) for Danish tax law.
 
-**Primary UI = the Maskinrummet frontend** (`server.py` FastAPI + `frontend/` React; run `uvicorn server:app` then `npm --prefix frontend run dev`). `app.py` remains the **single source of the agent runtime** (`build_runtime`, `stream_agent_answer`, tools, guards) — server.py and eval_run.py import it under a Streamlit stub. Its Streamlit UI (sidebar views, chat, eval panel) is **legacy/deprecated** as of E3 (superseded by Maskinrummet) but NOT removed: the runtime functions live in the same file and the module-level Streamlit code is load-bearing for the stub-import. Removing the Streamlit UI is a deferred, careful refactor (see backlog Phase E). Do not treat the Streamlit app as the deliverable.
+**The only UI is the Maskinrummet frontend** (`server.py` FastAPI + `frontend/` React; run `uvicorn server:app`, or `npm --prefix frontend run dev` for the Vite dev server proxying to it). `app.py` is the **single source of the agent runtime** (`build_runtime`, `stream_agent_answer`, tools, guards, scoring) and is now **pure runtime** — importing it executes no UI code and builds nothing at import time. The Streamlit app was **deleted on 2026-08-08** (1,390 lines: sidebar views, chat, eval panel, its own SQLite trace tables), together with the `sys.modules` Streamlit stubs that server.py/eval_run.py used to need. `streamlit`, `altair`, `pandas` and `neo4j_viz` are no longer dependencies.
 
 Laws in the graph: Personskatteloven (PSL, 2 versions), Ligningsloven (LL, 4 versions incl. 2025/1500), Selskabsskatteloven (SEL, 2 versions), Kildeskatteloven (KSL, 2 versions), Momsloven (ML), Aktieavancebeskatningsloven (ABL), Kursgevinstloven (KGL), Afskrivningsloven (AL), Fondsbeskatningsloven (FBL), Aktiesparekontoloven (ASKL), Boafgiftsloven (BAL, 2023/11 — D1), LOV 482/2024, PSL § 20 reguleringstabel 2025–2026.
 
 ## Environment Setup
 
-Uses a local `.venv`. Activate and run with:
+Uses a local `.venv`. Run the app with:
 
 ```bash
-.venv/bin/streamlit run app.py
+.venv/bin/python3 -m uvicorn server:app --port 8000
 ```
+
+Eval artefacts (run outputs, fixture baselines, run logs) live in **`eval_history/`** —
+`eval_run.py --output foo.jsonl` resolves a relative name into that folder, while an
+absolute path passes through unchanged. See `eval_history/README.md`.
 
 Requires a `.env` file with:
 ```
@@ -65,9 +69,9 @@ Temporal fields on nodes: `restrict_start_date`, `restrict_end_date`, `restrict_
 
 Embedding model: `intfloat/multilingual-e5-large` (1024 dims). Uses `passage: ` prefix for indexing and `query: ` prefix for search queries, per the model's convention.
 
-### `app.py` — Streamlit Agent App
+### `app.py` — the agent runtime (no UI)
 
-`build_runtime()` (cached via `@st.cache_resource`) initializes everything at startup:
+`build_runtime()` (memoised via `functools.lru_cache`) initializes everything on first call:
 - **`Neo4jAnalysis`** (`neo4j_analysis.py`) — thin wrapper around the Neo4j driver; `run_query` → list of dicts, `run_query_df` → DataFrame, `run_query_viz` → graph object for `neo4j-viz`.
 - **LLM** — priority: Ollama (if `OLLAMA_MODEL` set) → Gemini (`gemini-2.5-flash` if `GOOGLE_API_KEY` set) → OpenAI (`gpt-4o-mini` if `OPENAI_API_KEY` set).
 - **Embeddings** — `intfloat/multilingual-e5-large` via HuggingFace (1024 dims).
@@ -84,9 +88,17 @@ Embedding model: `intfloat/multilingual-e5-large` (1024 dims). Uses `passage: ` 
 
 `stream_agent_answer()` streams the LangGraph agent, collects tool trace events, and returns `(answer, tool_events)` — this 2-tuple must be preserved as `eval_run.py` unpacks it.
 
-### Sidebar Views
+Also in `app.py`: the F1 scope gate (`classify_request`, `SCOPE_TEMPLATES`), the
+scoring single-source (`score_item`, `detect_behavior`, `BEHAVIOR_SIGNALS` — A1),
+and token pricing (`cost_dkk`, `token_usage`, `PRICE_USD_PER_MTOK`), which
+server.py serves to the frontend so the UI never carries its own price table.
 
-10 views: Chat Interface, Architecture (3 Mermaid diagrams), Tools (agent tool catalog with schema inspector), Request Trace (waterfall timeline with LLM token counts and chain-of-thought), Evaluation (golden set browser + runner), The Complete Graph, Legislation Graph, Parts, Commentaries, Supersedes/Superseded By.
+### UI
+
+The Maskinrummet frontend (`frontend/`, served by `server.py`): chat + Kredsløbet,
+Graflinsen, Tankestrømmen, Tidslinjen, and the Eval lens (Testsuite / Historik
+sub-tabs — golden-set browser, smoke runner, dimension matrices, tool health).
+The old Streamlit sidebar-view UI was deleted 2026-08-08.
 
 ### System Prompt
 

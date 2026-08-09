@@ -14,18 +14,8 @@ import os
 import sys
 import time
 from pathlib import Path
-from unittest.mock import MagicMock
 
-# ── Mock streamlit before any app import ────────────────────────────────────
-_st = MagicMock()
-_st.cache_resource = lambda **kwargs: (lambda f: f)
-_st.columns = lambda spec, **kw: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
-_st.stop = lambda: sys.exit("Neo4j initialization failed — check credentials and DB status.")
-sys.modules.update({
-    "streamlit": _st,
-    "streamlit.components": _st,
-    "streamlit.components.v1": _st,
-})
+# app.py is pure runtime since 2026-08-08 — no Streamlit stub needed.
 
 import logging
 logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -35,7 +25,7 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-# Import shared scoring helpers (eval_run mocks streamlit too — idempotent).
+# Import shared scoring helpers (single-sourced in app.py since A1).
 from eval_run import score_item, _is_quota_error  # noqa: E402
 from app import build_runtime, stream_agent_answer  # noqa: E402
 

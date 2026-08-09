@@ -84,7 +84,7 @@ EXPECTED_STALE = {
     ("eval_results_f3_gemma_off.jsonl", "gs-064"),
 }
 total = mismatch = explained = skipped_old = 0
-files = sorted(REPO.glob("eval_results_*.jsonl"))
+files = sorted((REPO / "eval_history").glob("eval_results_*.jsonl"))
 for p in files:
     n = bad = 0
     for line in p.read_text(encoding="utf-8").splitlines():

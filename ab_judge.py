@@ -43,7 +43,12 @@ def main() -> int:
     import eval_run
 
     def load(cell):
-        p = REPO / f"eval_results_{args.prefix}_{cell}.jsonl"
+        # eval artefacts live in eval_history/ since 2026-08-08; fall back to the
+        # repo root so older cells still judge.
+        fname = f"eval_results_{args.prefix}_{cell}.jsonl"
+        p = REPO / "eval_history" / fname
+        if not p.is_file():
+            p = REPO / fname
         return {json.loads(l)["item"]["id"]: json.loads(l)
                 for l in p.read_text(encoding="utf-8").splitlines() if l.strip()}
 

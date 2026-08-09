@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """
-server.py — FastAPI backend for Maskinrummet, the event-driven frontend
-(backlog Phase E). It is a thin adapter over the existing Streamlit agent:
-`app.py` remains the single source of the agent runtime. Same proven pattern as
-eval_run.py — stub `streamlit` in `sys.modules`, then import build_runtime /
-stream_agent_answer from `app`. No agent logic lives here.
+server.py — FastAPI backend for Maskinrummet, the frontend (backlog Phase E) and
+the project's only UI since the Streamlit app was removed on 2026-08-08.
+`app.py` remains the single source of the agent runtime and is now pure runtime,
+so this simply imports build_runtime / stream_agent_answer from it. No agent
+logic lives here.
 
 Endpoints:
   GET  /api/architecture   runtime truth: provider, tool list, graph stats, app_mode
@@ -27,23 +27,10 @@ import threading
 import time
 import uuid
 from pathlib import Path
-from unittest.mock import MagicMock
 
-# ── Stub Streamlit before importing app (identical rationale to eval_run.py) ──
-# app.py runs Streamlit UI code at import time, including a build_runtime() call
-# at module bottom. Under the stub that top-level build still runs once — we
-# reuse its result below. st.stop() is a no-op here (NOT sys.exit) so a transient
-# Aura hiccup at import doesn't abort the server; we validate + retry ourselves.
-_st = MagicMock()
-_st.cache_resource = lambda **kwargs: (lambda f: f)
-_st.columns = lambda spec, **kw: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
-_st.stop = lambda: None
-_st.error = lambda *a, **k: None
-sys.modules.update({
-    "streamlit": _st,
-    "streamlit.components": _st,
-    "streamlit.components.v1": _st,
-})
+# The Streamlit stub that used to sit here is gone (2026-08-08): app.py is now
+# pure runtime, so importing it no longer executes UI code and no longer builds
+# a runtime at import time. `_acquire_runtime()` below owns initialisation.
 
 import logging  # noqa: E402
 logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -55,7 +42,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import app as agent_app  # noqa: E402  (triggers one import-time build_runtime)
 from app import (  # noqa: E402
     build_runtime, stream_agent_answer, resolve_llm_provider, redact_if_pii,
-    token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK,
+    token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK, EVAL_HISTORY_DIR,
 )
 
 from fastapi import FastAPI, Request  # noqa: E402
@@ -97,22 +84,14 @@ def _build_with_retry(attempts: int = 4, timeout_s: int = 120):
 
 
 def _acquire_runtime():
-    """Prefer the runtime app.py already built at import time (avoids a second
-    ~20s build); fall back to an explicit retried build if that one is missing or
-    its Neo4j connection is dead."""
-    analysis = getattr(agent_app, "analysis", None)
-    executor = getattr(agent_app, "agent_executor", None)
-    tools = getattr(agent_app, "agent_tools", None)
-    ok = analysis is not None and executor is not None and tools is not None
-    if ok:
-        try:
-            ok = bool(analysis.verify_connection())
-        except Exception:
-            ok = False
-    if not ok:
-        print("Import-time runtime unavailable — building explicitly…", flush=True)
-        analysis, executor, tools = _build_with_retry()
-    return analysis, executor, tools
+    """Build the runtime, with retries for Aura's flaky startup.
+
+    Before 2026-08-08 this preferred a runtime that app.py had already built as a
+    side effect of its Streamlit page code executing at import. That side effect
+    is gone now that app.py is pure runtime, so this is the single initialisation
+    path — which is also why the module-level globals it used to reuse no longer
+    exist."""
+    return _build_with_retry()
 
 
 print("Maskinrummet server — acquiring agent runtime…", flush=True)
@@ -826,14 +805,20 @@ def _scan_eval_file(path: Path) -> dict | None:
 
 @app.get("/api/eval/runs")
 def eval_runs():
-    base = Path(__file__).parent
+    # Eval artefacts live in eval_history/ since 2026-08-08; the root is still
+    # scanned so an older checkout (or a hand-dropped file) is not invisible.
     out = []
-    for p in base.glob("eval_results_*.jsonl"):
-        if p.stat().st_size == 0:
-            continue
-        s = _scan_eval_file(p)
-        if s:
-            out.append(s)
+    seen: set[str] = set()
+    for base in (Path(EVAL_HISTORY_DIR), Path(__file__).parent):
+        for p in base.glob("eval_results_*.jsonl"):
+            if p.name in seen:
+                continue
+            seen.add(p.name)
+            if p.stat().st_size == 0:
+                continue
+            s = _scan_eval_file(p)
+            if s:
+                out.append(s)
     out.sort(key=lambda r: r["ts"], reverse=True)
     return JSONResponse(out)
 
@@ -842,10 +827,13 @@ def eval_runs():
 def eval_run_items(name: str):
     """Per-item detail for one eval file: pass-frequency across repeats + the
     last answer, for the drill-down."""
+    # The basename-only check is the traversal guard; resolve it against
+    # eval_history/ first, then the root for older layouts.
     if "/" in name or ".." in name or not name.startswith("eval_results_"):
         return JSONResponse({"error": "bad name"}, status_code=400)
-    path = Path(__file__).parent / name
-    if not path.is_file():
+    path = next((p for p in (Path(EVAL_HISTORY_DIR) / name, Path(__file__).parent / name)
+                 if p.is_file()), None)
+    if path is None:
         return JSONResponse({"error": "not found"}, status_code=404)
     by_item: dict[str, dict] = {}
     for line in path.read_text(encoding="utf-8").splitlines():
@@ -888,9 +876,10 @@ def eval_fixtures():
     A third results shape: no agent, no tools — one classifier verdict per item.
     Kept separate from /api/eval/runs on purpose; folding it into the run scanner
     would mix a zero-LLM L0 rung into agent-run statistics."""
-    base = Path(__file__).parent
     out = []
-    for p in sorted(base.glob("eval_fixtures_scope_*.jsonl")):
+    paths = sorted(Path(EVAL_HISTORY_DIR).glob("eval_fixtures_scope_*.jsonl")) or \
+        sorted(Path(__file__).parent.glob("eval_fixtures_scope_*.jsonl"))
+    for p in paths:
         rows = []
         for line in p.read_text(encoding="utf-8").splitlines():
             if line.strip():

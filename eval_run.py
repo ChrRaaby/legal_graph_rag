@@ -59,18 +59,8 @@ elif _llm_override == "openai":
     os.environ["LLM_PROVIDER"] = "openai"
 # "auto" → leave env as-is
 
-# ── Mock streamlit before importing app ──────────────────────────────────────
-_st = MagicMock()
-_st.cache_resource = lambda **kwargs: (lambda f: f)
-# st.columns(n) must return a list of n MagicMock objects so tuple-unpacking works
-_st.columns = lambda spec, **kw: [MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))]
-# st.stop() is called by app.py when Neo4j init fails — make it actually stop
-_st.stop = lambda: sys.exit("Neo4j initialization failed — check credentials and DB status.")
-sys.modules.update({
-    "streamlit": _st,
-    "streamlit.components": _st,
-    "streamlit.components.v1": _st,
-})
+# The Streamlit mock that used to sit here is gone (2026-08-08): app.py is pure
+# runtime now, so importing it executes no UI code.
 
 import logging
 logging.getLogger("neo4j").setLevel(logging.ERROR)
@@ -88,7 +78,7 @@ from app import (  # noqa: E402,F401
     BEHAVIOR_SIGNALS, BEHAVIOR_PRIORITY, SUBSTANTIVE_BEHAVIORS,
     _normalize, _term_label, _term_present,
     detect_behavior, behavior_matches, score_item,
-    token_usage, cost_dkk,
+    token_usage, cost_dkk, eval_artifact_path, EVAL_HISTORY_DIR,
 )
 
 
@@ -598,9 +588,7 @@ def main() -> None:
 
     # --failing-only: keep only items that failed in the previous output file
     if args.failing_only:
-        output_path_prev = Path(args.output)
-        if not output_path_prev.is_absolute():
-            output_path_prev = Path(__file__).parent / args.output
+        output_path_prev = Path(eval_artifact_path(args.output))
         if output_path_prev.exists():
             passed_ids: set[str] = set()
             for line in output_path_prev.read_text(encoding="utf-8").splitlines():
@@ -636,9 +624,8 @@ def main() -> None:
         print("Initializing LLM judge…")
         judge_llm = build_judge_llm()
 
-    output_path = Path(args.output)
-    if not output_path.is_absolute():
-        output_path = Path(__file__).parent / args.output
+    # Relative names land in eval_history/ (absolute paths pass through).
+    output_path = Path(eval_artifact_path(args.output))
     # Truncate output file at start of run (fresh run)
     output_path.write_text("", encoding="utf-8")
 
