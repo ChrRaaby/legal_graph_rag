@@ -28,6 +28,7 @@ export type AgentEvent =
       output_tokens: number;
       thinking: string;
       is_final: boolean;
+      model?: string;
     }
   | { type: "tool_call"; elapsed_s: number; node?: string; tool_name: string; args: unknown }
   | {

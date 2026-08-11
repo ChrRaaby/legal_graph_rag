@@ -21,6 +21,7 @@ interface LlmCard {
   outTok: number;
   dur: number;
   final: boolean;
+  model?: string;
 }
 interface ToolCard {
   kind: "tool";
@@ -63,6 +64,7 @@ function buildCards(log: AgentEvent[]): Card[] {
       cards.push({
         kind: "llm", reveal: ev.start_s * 1000, logIndex: i, thinking: ev.thinking,
         inTok: ev.input_tokens, outTok: ev.output_tokens, dur: ev.duration_s, final: ev.is_final,
+        model: ev.model,
       });
     } else if (ev.type === "tool_call") {
       (pendingCall[ev.tool_name] ??= []).push(ev);
@@ -186,6 +188,7 @@ export default function Tankestrom({ log, t, live, question, provider, runId }: 
                   <span>ud {c.outTok.toLocaleString("da-DK")} tok</span>
                   <span>{kr == null ? "lokal" : formatKr(kr)}</span>
                   <span>{c.dur.toFixed(1).replace(".", ",")} s</span>
+                  {c.model && <span>model: {c.model}</span>}
                 </div>
                 {blocks.length > 0 && <ContextTools blocks={blocks} runId={runId} summaryLabel="Vis kontekst til dette kald" />}
               </div>

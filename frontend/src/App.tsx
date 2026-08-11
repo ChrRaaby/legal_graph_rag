@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
 import {
-  fetchArchitecture, fetchTraces, fetchTrace, postFeedback,
+  fetchArchitecture, fetchTraces, fetchTrace, postFeedback, setProvider, setAppMode,
   type Architecture, type TraceSummary,
 } from "./lib/api";
 import type { Citation } from "./lib/events";
@@ -120,12 +120,54 @@ export default function App() {
               ))}
             </select>
           )}
-          {isDev && <span className="badge">LLM <b>{arch.provider}</b></span>}
+          {isDev && (
+            <span className="badge">
+              LLM{" "}
+              <select
+                style={{
+                  background: "transparent",
+                  color: "inherit",
+                  border: "none",
+                  outline: "none",
+                  fontWeight: "bold",
+                  cursor: "pointer",
+                }}
+                value={arch.provider}
+                onChange={(e) => {
+                  const newProvider = e.target.value;
+                  setArch({ ...arch, provider: newProvider });
+                  setProvider(newProvider).catch(() => {
+                    // Revert on error
+                    setArch({ ...arch });
+                  });
+                }}
+                aria-label="Vælg LLM model"
+              >
+                <option value="gemini:gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
+                <option value="gemini:gemini-3.6-flash">gemini-3.6-flash</option>
+                <option value="gemini:gemini-3.1-pro">gemini-3.1-pro</option>
+                <option value="gemini:gemma-4-31b-it">gemma-4-31b-it (Gemini API)</option>
+                <option value="gemini:gemma-4-26b-a4b-it">gemma-4-26b-a4b-it (Gemini API)</option>
+                <option value="ollama">gemma4:26b (Ollama)</option>
+              </select>
+            </span>
+          )}
           <span className="badge">
             Graf <b>{nf.format(arch.graph_stats.legislation)} love · {nf.format(arch.graph_stats.sections)} §§</b>
           </span>
           <button className="theme-toggle" onClick={cycleTheme} aria-label="Skift tema">{themeLabel}</button>
-          {isDev && <span className="badge mode">dev-tilstand</span>}
+          <button 
+            className="badge mode" 
+            onClick={() => {
+              const newMode = arch.app_mode === "dev" ? "user" : "dev";
+              setArch({ ...arch, app_mode: newMode });
+              setAppMode(newMode).catch(() => setArch({ ...arch }));
+            }}
+            style={{ cursor: "pointer", border: "none", outline: "none", background: "transparent" }}
+            aria-label="Skift tilstand"
+          >
+            {arch.app_mode === "dev" ? "dev-tilstand" : "user-tilstand"}
+          </button>
         </div>
       </header>
 

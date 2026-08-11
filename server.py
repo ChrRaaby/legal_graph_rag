@@ -492,6 +492,7 @@ def _client_event(ev: dict) -> dict:
     out = dict(ev)
     if out.get("type") == "llm_call":
         out["type"] = "llm"
+        out["model"] = PROVIDER
     elif out.get("type") == "tool_result":
         out["graph_refs"] = _refs_from_tool_output(out.get("content_full") or "")
     return out
@@ -607,6 +608,32 @@ async def ask(request: Request):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+# ── Provider switch ─────────────────────────────────────────────────────────────
+
+@app.post("/api/provider")
+async def set_provider(request: Request):
+    global PROVIDER, ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS
+    body = await request.json()
+    new_provider = body.get("provider")
+    if not new_provider:
+        return JSONResponse({"error": "missing provider"}, status_code=400)
+    try:
+        ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS = build_runtime(new_provider)
+        PROVIDER = new_provider
+        return JSONResponse({"status": "ok", "provider": PROVIDER})
+    except Exception as exc:
+        return JSONResponse({"error": str(exc)}, status_code=500)
+
+@app.post("/api/app_mode")
+async def set_app_mode(request: Request):
+    global APP_MODE
+    body = await request.json()
+    new_mode = body.get("app_mode")
+    if new_mode in ("dev", "user"):
+        APP_MODE = new_mode
+    return JSONResponse({"status": "ok", "app_mode": APP_MODE})
 
 
 # ── E2: graph lens, drill-down, citations, feedback, history ──────────────────

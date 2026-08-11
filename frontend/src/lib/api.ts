@@ -198,6 +198,28 @@ export async function fetchArchitecture(): Promise<Architecture> {
   return arch;
 }
 
+export async function setProvider(provider: string): Promise<string> {
+  const res = await fetch("/api/provider", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ provider }),
+  });
+  if (!res.ok) throw new Error(`provider ${res.status}`);
+  const data = await res.json();
+  return data.provider;
+}
+
+export async function setAppMode(appMode: "dev" | "user"): Promise<string> {
+  const res = await fetch("/api/app_mode", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ app_mode: appMode }),
+  });
+  if (!res.ok) throw new Error(`app_mode ${res.status}`);
+  const data = await res.json();
+  return data.app_mode;
+}
+
 export async function fetchSubgraph(refs: GraphRef[], answer: string): Promise<Subgraph> {
   const res = await fetch("/api/graph/subgraph", {
     method: "POST",
