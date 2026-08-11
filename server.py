@@ -19,14 +19,19 @@ Run (prod):  build the frontend (npm run build), then
 """
 import json
 import os
+import base64
 import queue
 import re
+import secrets
 import sqlite3
 import sys
 import threading
 import time
 import uuid
+from collections import defaultdict
 from pathlib import Path
+
+from dotenv import load_dotenv
 
 # The Streamlit stub that used to sit here is gone (2026-08-08): app.py is now
 # pure runtime, so importing it no longer executes UI code and no longer builds
@@ -852,11 +857,15 @@ def _scan_eval_file(path_or_content) -> dict | None:
     tool_calls_total = sum(int((r.get("scores") or {}).get("tool_call_count") or 0)
                            for r in records)
 
-    ts = first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(path.stat().st_mtime))
+    if hasattr(path_or_content, "stat"):
+        mtime = path_or_content.stat().st_mtime
+    else:
+        mtime = time.time()
+    ts = first.get("ts") or time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(mtime))
     return {
-        "name": path.name,
-        "model": _infer_model(path.name, first),
-        "set_version": _infer_set(path.name, first),
+        "name": name_fallback,
+        "model": _infer_model(name_fallback, first),
+        "set_version": _infer_set(name_fallback, first),
         "git_sha": first.get("git_sha") or "—",
         "ts": ts,
         "repeat": runs,
@@ -1355,6 +1364,41 @@ async def feedback(request: Request):
         con.commit()
         con.close()
     return JSONResponse({"ok": True})
+
+
+# ── Security Middleware ───────────────────────────────────────────────────────
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import Response
+
+class BasicAuthMiddleware(BaseHTTPMiddleware):
+    def __init__(self, app, username: str, password: str):
+        super().__init__(app)
+        self.username = username.strip() if username else username
+        self.password = password.strip() if password else password
+
+    async def dispatch(self, request: Request, call_next):
+        if not self.username or not self.password:
+            return await call_next(request)
+            
+        auth_header = request.headers.get("Authorization")
+        if not auth_header or not auth_header.lower().startswith("basic "):
+            return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Maskinrummet"'})
+        
+        try:
+            # Scheme is 6 chars: "Basic " or "basic "
+            decoded = base64.b64decode(auth_header[6:]).decode("utf-8")
+            username, _, password = decoded.partition(":")
+            if not (secrets.compare_digest(username, self.username) and 
+                    secrets.compare_digest(password, self.password)):
+                print(f"[AUTH FAIL] Username or password mismatch. Got user: '{username}'", flush=True)
+                return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Maskinrummet"'})
+        except Exception as e:
+            print(f"[AUTH ERROR] {e}", flush=True)
+            return Response("Unauthorized", status_code=401, headers={"WWW-Authenticate": 'Basic realm="Maskinrummet"'})
+            
+        return await call_next(request)
+
+app.add_middleware(BasicAuthMiddleware, username=os.getenv("APP_USERNAME"), password=os.getenv("APP_PASSWORD"))
 
 
 # ── Static frontend (mounted last so /api/* wins) ─────────────────────────────
