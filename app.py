@@ -39,6 +39,10 @@ OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://172.21.64.1:11434")
 LLM_PROVIDER = os.getenv("LLM_PROVIDER")   # ollama | gemini:<model> | openai | None (auto-detect)
 GEMINI_MODEL = os.getenv("GEMINI_MODEL", "gemini-3.5-flash")
 GEMINI_MODELS = [m.strip() for m in os.getenv("GEMINI_MODELS", GEMINI_MODEL).split(",") if m.strip()]
+# Per-request ceiling for the Gemini client. Generous enough for a slow
+# multi-tool item, short enough that a dead socket cannot park a 69-item run
+# indefinitely (see build_runtime).
+GEMINI_TIMEOUT_S = int(os.getenv("GEMINI_TIMEOUT_S", "120"))
 AGENT_RETRIEVAL_K = int(os.getenv("AGENT_RETRIEVAL_K", 10))
 AGENT_HISTORY_MESSAGES = int(os.getenv("AGENT_HISTORY_MESSAGES", 20))
 DEBUG_TOOL_CALLS = os.getenv("DEBUG_TOOL_CALLS") is not None
@@ -496,6 +500,13 @@ def build_runtime(provider: str | None = None):
             temperature=0,
             api_key=GOOGLE_API_KEY,
             include_thoughts=True,
+            # Without these a dropped connection hangs the caller forever: an
+            # overnight eval run was found parked at 0% CPU in futex_do_wait
+            # with its HTTPS socket in CLOSE-WAIT — the peer had gone away and
+            # nothing ever timed out. Bounded wait + retry turns a silent
+            # indefinite stall into a slow item.
+            timeout=GEMINI_TIMEOUT_S,
+            max_retries=3,
         )
     else:
         if not OPENAI_API_KEY:
