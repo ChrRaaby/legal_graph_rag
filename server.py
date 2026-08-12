@@ -49,7 +49,7 @@ from app import (  # noqa: E402
     build_runtime, stream_agent_answer, resolve_llm_provider, resolve_run_model,
     redact_if_pii,
     token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK, EVAL_HISTORY_DIR,
-    GEMINI_MODELS,
+    GEMINI_MODELS, NEO4J_URI, NEO4J_DATABASE,
 )
 
 from fastapi import FastAPI, Request  # noqa: E402
@@ -602,6 +602,77 @@ def health():
 @app.get("/api/architecture")
 def architecture():
     return JSONResponse(_architecture())
+
+
+@app.get("/api/system")
+def system_map():
+    """G3: the whole solution, not just the request path.
+
+    Kredsløbet answers "how does one question flow through the agent". This
+    answers "what is this system made of, right now, including the substrate it
+    is deployed on".
+
+    Every node is marked `observed` or declared. Observed means the running
+    process actually knows it — the provider it resolved, the tools it loaded,
+    the row counts it queried, whether the Firestore and GCS clients came up,
+    the Cloud Run revision from K_REVISION. Declared means the container cannot
+    see it from inside (it holds no admin credentials and should not) and the
+    fact is written down here instead. The distinction is the whole point: this
+    project has been burned by a diagram that quietly went stale, so a declared
+    node must LOOK declared rather than borrow the authority of a measured one.
+    """
+    on_cloud_run = bool(os.getenv("K_SERVICE"))
+    neo4j_kind = "Neo4j Aura" if "neo4j+s" in (NEO4J_URI or "") else "Neo4j"
+
+    return JSONResponse({
+        "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "nodes": [
+            {"id": "frontend", "layer": "klient", "label": "React + Vite",
+             "detail": "Maskinrummet · SPA, serveret statisk af backenden",
+             "observed": False},
+            {"id": "backend", "layer": "tjeneste", "label": "FastAPI + uvicorn",
+             "detail": f"Python {sys.version.split()[0]} · app_mode={APP_MODE}"
+                       f"{' · Basic Auth' if os.getenv('APP_USERNAME') else ''}",
+             "observed": True},
+            {"id": "agent", "layer": "tjeneste", "label": "LangGraph ReAct",
+             "detail": f"{len(AGENT_TOOLS)} værktøjer · skjold foran",
+             "observed": True},
+            {"id": "llm", "layer": "model", "label": RUN_MODEL,
+             "detail": PROVIDER, "observed": True},
+            {"id": "embeddings", "layer": "model", "label": "e5-large",
+             "detail": "intfloat/multilingual-e5-large · lokalt indlæst",
+             "observed": True},
+            {"id": "graph", "layer": "data", "label": neo4j_kind,
+             "detail": f"{_graph_stats().get('legislation', 0)} love · "
+                       f"{_graph_stats().get('sections', 0)} §§ · db={NEO4J_DATABASE or 'neo4j'}",
+             "observed": True},
+            {"id": "hosting", "layer": "platform",
+             "label": "Cloud Run" if on_cloud_run else "lokal kørsel",
+             "detail": (f"{os.getenv('K_SERVICE')} · {os.getenv('K_REVISION')}"
+                        if on_cloud_run else "uvicorn på udviklermaskinen"),
+             "observed": True},
+            {"id": "firestore", "layer": "platform", "label": "Firestore",
+             "detail": "mr_runs · mr_feedback"
+                       + ("" if _firestore_client else " · IKKE forbundet (falder tilbage til sqlite)"),
+             "observed": True, "healthy": bool(_firestore_client)},
+            {"id": "gcs", "layer": "platform", "label": "Cloud Storage",
+             "detail": (_gcs_bucket.name if _gcs_bucket else "IKKE forbundet")
+                       + " · eval_history/",
+             "observed": True, "healthy": bool(_gcs_bucket)},
+            {"id": "secrets", "layer": "platform", "label": "Secret Manager",
+             "detail": "env-vars på revisionen — kan ikke ses indefra",
+             "observed": False},
+            {"id": "registry", "layer": "platform", "label": "Artifact Registry",
+             "detail": "cloud-run-source-deploy · container-image",
+             "observed": False},
+        ],
+        "edges": [
+            ["frontend", "backend"], ["backend", "agent"], ["agent", "llm"],
+            ["agent", "graph"], ["backend", "embeddings"], ["embeddings", "graph"],
+            ["backend", "firestore"], ["backend", "gcs"],
+            ["hosting", "backend"], ["secrets", "backend"], ["registry", "hosting"],
+        ],
+    })
 
 
 @app.post("/api/ask")

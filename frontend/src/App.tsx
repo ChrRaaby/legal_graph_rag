@@ -9,12 +9,15 @@ import { useRunClock } from "./lib/useRunClock";
 import Chat from "./components/Chat";
 import Maskinrummet, { type TabId } from "./components/Maskinrummet";
 import Eval from "./components/Eval";
+import Arkitektur from "./components/Arkitektur";
 
 type Theme = "auto" | "dark" | "light";
-/** Two scopes, not four lenses. `samtale` is one conversation — chat plus the
- *  three lenses, all functions of (event_log, t). `eval` is the corpus and its
- *  aggregate history, which has neither. See whitepapers/eval_workspace_design.md. */
-type Workspace = "samtale" | "eval";
+/** Scopes, not lenses. `samtale` is one conversation — chat plus the three
+ *  lenses, all functions of (event_log, t). `eval` is the corpus and its
+ *  aggregate history. `arkitektur` is the deployed system itself. Only the
+ *  first has a clock, which is why only it gets the rail and the Tidslinje.
+ *  See whitepapers/eval_workspace_design.md. */
+type Workspace = "samtale" | "eval" | "arkitektur";
 const nf = new Intl.NumberFormat("da-DK");
 
 export default function App() {
@@ -108,12 +111,13 @@ export default function App() {
   const isDev = arch.app_mode === "dev";
   const showMaskinrum = isDev || revealed;
   const showEval = isDev && workspace === "eval";
+  const showArch = isDev && workspace === "arkitektur";
   const themeLabel = theme === "auto" ? "◑ auto" : theme === "dark" ? "☾ mørk" : "☀ lys";
   const question = [...run.messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const answer = [...run.messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
 
   return (
-    <div className={`app${showEval ? " ws-eval" : ""}`}>
+    <div className={`app${showEval || showArch ? " ws-eval" : ""}`}>
       <header>
         <div className="brand">
           <span className="par">§</span>Skattegraf
@@ -124,13 +128,14 @@ export default function App() {
             in front. Flipping to user-tilstand returns to Samtale. */}
         {isDev && (
           <nav className="ws-switch" aria-label="Arbejdsrum">
-            {(["samtale", "eval"] as Workspace[]).map((w) => (
+            {([["samtale", "Samtale"], ["eval", "Eval"], ["arkitektur", "Arkitektur"]] as
+              [Workspace, string][]).map(([w, label]) => (
               <button
                 key={w}
                 aria-current={workspace === w}
                 onClick={() => setWorkspace(w)}
               >
-                {w === "samtale" ? "Samtale" : "Eval"}
+                {label}
               </button>
             ))}
           </nav>
@@ -210,6 +215,10 @@ export default function App() {
       {showEval ? (
         <section className="panel eval-workspace" aria-label="Eval">
           <Eval onInspectRun={inspectRun} />
+        </section>
+      ) : showArch ? (
+        <section className="panel eval-workspace" aria-label="Arkitektur">
+          <Arkitektur />
         </section>
       ) : (
       <div className={`split${showMaskinrum ? "" : " user"}`}>

@@ -193,6 +193,29 @@ export interface ChatMessage {
   content: string;
 }
 
+/** G3 system map: the whole solution, including the GCP substrate. Each node
+ *  says whether the running process observed it or merely declares it. */
+export interface SystemNode {
+  id: string;
+  layer: "klient" | "tjeneste" | "model" | "data" | "platform";
+  label: string;
+  detail: string;
+  observed: boolean;
+  /** Only present for nodes whose connection the server actually probes. */
+  healthy?: boolean;
+}
+export interface SystemMap {
+  generated_at: string;
+  nodes: SystemNode[];
+  edges: [string, string][];
+}
+
+export async function fetchSystemMap(): Promise<SystemMap> {
+  const res = await fetch("/api/system");
+  if (!res.ok) throw new Error(`system ${res.status}`);
+  return (await res.json()) as SystemMap;
+}
+
 export async function fetchArchitecture(): Promise<Architecture> {
   const res = await fetch("/api/architecture");
   if (!res.ok) throw new Error(`architecture ${res.status}`);
