@@ -122,32 +122,76 @@ should face a fresh usage census.
   push a chosen full run. Decide: upload *all* 57, or a curated few? The lens
   scans every blob under the prefix, so bulk upload changes what the Historik tab
   shows by default.
-- ☐ **Decide how the run is reachable in `APP_MODE=user`.** The Eval tab is hidden
-  entirely in user mode (`showMaskinrum = isDev || revealed`, handover doc §67);
-  the live service runs user mode. Options: reveal Eval read-only in user mode,
-  add a dev-only route, or flip the live `APP_MODE`. **User call.**
-- ☐ **Run 1 — `gemini-3.6-flash`, full 50.** ⚠ This lifts the 🔒 gate at the
+- ☑ **DECIDED 2026-08-12 — the app defaults to `dev` mode, with a UI toggle between
+  user and dev.** So the Eval tab is reachable live by default. ⚠ This is a
+  **posture change on a public URL**: dev mode exposes the eval runner (which spends
+  API money) and dev routes. Basic Auth from `58fd7e7` is the thing standing in
+  front of it — confirm the toggle cannot be reached unauthenticated, and that
+  `APP_MODE` remains the *default* rather than the only control. A dev/user toggle
+  already landed in `23feaa9`; check how much of this is done before building.
+- ☑ **DECIDED 2026-08-12 — both runs execute locally and are uploaded** to the live
+  eval history. Neither needs to run in Cloud Run. This removes the GPU/Ollama
+  blocker for gemma *and* means the flash run needs no cloud substrate either.
+  Consequence to keep straight: these runs measure the **local** substrate
+  (3.5-flash / 12 tools), which is still not what the deployed agent runs — the
+  drift noted in the gate table stands, and the run tiles must not imply otherwise.
+- ☐ **Run 1 — `gemini-3.6-flash`, full 50, run locally.** ⚠ Lifts the 🔒 gate at the
   bottom of this file ("Newer models now listed … switching is a **substrate
-  change**"): user asked for it 2026-08-12, so it is approved *as a run*, but
-  ground rule 6 still applies — it is a **matched pair**, not a one-off, if the
-  result is ever used to justify switching the default substrate. Costs API money.
-  Pin the full model id, never an alias (traps-index rule).
-- ☐ **Run 2 — on-prem gemma, full 50.** ⚠ Cannot execute *in* Cloud Run: no GPU,
-  and `OLLAMA_BASE_URL` points at the local box. The run happens **locally**, the
-  result file is uploaded, and the live app shows it as historical data. Note the
-  reproducibility rule from F3: unload/reload the model between cells, never
-  back-to-back.
+  change**"): approved *as a run* 2026-08-12, but ground rule 6 still applies — a
+  **matched pair** is required if the result is ever used to justify switching the
+  default substrate. Costs API money. Pin the full model id, never an alias.
+- ☐ **Run 2 — on-prem gemma, full 50, run locally.** Note the reproducibility rule
+  from F3: unload/reload the model between cells, never back-to-back.
 - ☐ **Label the substrate in the UI.** Two runs on different substrates will sit
   side by side in Historik; the run tile must make model + provider unmissable or
   the comparison silently misleads. Result files already carry the stamp.
 
-### G2. Eval UI rework ☐ — **needs requirements before it can start**
+### G2. Eval UI rework ⏳ — detailing started 2026-08-12
 
-User wants the Eval lens "reworked a bit" (2026-08-12). The current shape is E4's:
-Eval tab split into *Testsuite* (browse + smoke runner) and *Historik* (past runs,
-matrix, items, fixtures, tool health). **Specifics not yet captured — do not start
-guessing.** Open the requirements with the same F0-style pass that worked for
-Phase F.
+Current shape is E4's: Eval tab split into *Testsuite* (browse + smoke runner) and
+*Historik* (past runs, matrix, items, fixtures, tool health).
+
+**Observed against the running local app 2026-08-12** (`app_mode=dev`,
+3.5-flash, 12 tools, 48 runs in history, golden set v4.2 · 69 items). Findings are
+ranked by how much they distort the analysis, not by how easy they are to fix:
+
+1. ☐ **Historik opens on a stale run by default.** Both selects default to
+   **index 32 of 48** — `eval_results_v4_flash_5x.jsonl` vs
+   `eval_results_v4_gemma_run5.jsonl`, **both from 2026-07-05, five weeks old** —
+   while the newest run (2026-08-09) sits at index 0. Every screenshot in this
+   file's history is therefore of an obsolete comparison. Default should be
+   newest-vs-its-natural-counterpart, or explicitly "no run selected".
+2. ☐ **Denominators are not comparable and the headline tile is raw.** One dropdown
+   mixes `/69`, `/50`, `/30`, `/13`, `/7`, `/3`, `/2`, `/1` (set grew v4→v4.2, plus
+   smoke and debug runs). "36/69" and "36/50" read as equal at a glance and are not.
+   Normalise the headline to a percentage, and **separate real runs from smoke/debug
+   stubs** — a `1/1` run does not belong in the same list as a 69-item run.
+3. ☐ **Tags matrix is a wall of noise.** ~40+ rows, sorted **alphabetically**, almost
+   all with **n=5**, and the comparison column is mostly `—` (the two runs rarely
+   share tags). Bare `0%`/`20%`/`100%` at n=5 invites over-reading pure noise. Sort
+   by signal (gap size, or n), collapse or grey n<10, and show the pair count.
+4. ☐ **Run labels lose the model.** Recent entries read `ollama · v4.2 · …` while
+   older ones read `gemma4:26b · v4 · …`. Which local model produced the v4.2 runs
+   is **not recoverable from the picker** — directly harmful with G1 about to add
+   two more local runs. Six near-identical `ollama · v4.2 · 1×` entries currently
+   differ only by score and date.
+5. ☐ **A 48-entry raw `<select>` is the only way to find a run.** No search, no
+   grouping by substrate or set version, no filtering. Compare-picker repeats it.
+6. ☐ **Two of six stat tiles are dead** on older files (`APP-COMMIT —`,
+   `FORBRUG IKKE REGISTRERET I DENNE FIL`). Honest (E4 chose null over fake 0) but
+   they occupy prime space; collapse when empty.
+7. ☐ **Vertical space is the structural problem.** The lens lives in the bottom
+   pane (~400 px) with its own nested scrollbar, beneath a chat pane that is
+   ~500 px of mostly empty whitespace. The dimension tables show 2–3 rows at a
+   time. Eval is a **data-dense, full-attention view** and does not fit the
+   split-screen model the other three lenses were designed for. Options: give Eval
+   a full-height mode, or let the chat pane collapse when Eval is active.
+8. ☐ **Tool health is buried at the very bottom** of that nested scroll — yet with
+   G4 it is currently the most decision-relevant table in the app. Promote it.
+
+**Still needed from the user:** which of the above are in scope, and whether they
+have their own complaints not on this list (the list is an inspection, not their
+brief).
 
 ### G3. Architecture tab in Maskinrummet ☐
 
@@ -155,16 +199,21 @@ Phase F.
   LLM, Python backend, React frontend, Neo4j, and the GCP components
   (Cloud Run, Firestore `mr_runs`/`mr_feedback`, GCS `…-eval-history`,
   Secret Manager, Artifact Registry).
-- ⚠ **Design tension to resolve first:** this project's stated rule is that
-  Kredsløbet *"genereres fra runtime … og kan aldrig"* go stale (App.tsx:205), and
-  the redesign doc opens by calling out exactly this failure — the old views were
-  "factually stale — hardcoded '13 tools', 'Gemini 2.5 Flash'". A hand-drawn
-  architecture diagram is precisely that failure mode reintroduced. **Recommendation:**
-  static topology (boxes/edges) may be hand-drawn, but every *label that can drift*
-  — model id, tool count, provider, graph stats, revision — must bind to
-  `/api/architecture` rather than be typed into the SVG.
-- ☐ Decide whether the GCP layer is discovered or declared. Declared is fine if
-  the drift-prone labels follow the rule above.
+- ☑ **DECIDED 2026-08-12 — generate it dynamically, not by hand.** This settles the
+  tension with the project's own rule that Kredsløbet *"genereres fra runtime … og
+  kan aldrig"* go stale (App.tsx:205); the redesign doc opens by condemning exactly
+  the hand-drawn failure ("factually stale — hardcoded '13 tools', 'Gemini 2.5
+  Flash'"). Kredsløbet is the working precedent — same pattern, wider scope.
+- ☐ **Sketch the generation approach before building.** The honest split: the app's
+  own layer is *observable* (`/api/architecture` already serves provider, model,
+  tool list and graph stats; Neo4j reports its own counts), while the GCP layer is
+  not — the container cannot enumerate its own Firestore/GCS/Secret Manager wiring
+  without admin credentials it should not hold. **Proposed:** declare the GCP
+  topology as data (a small server-side manifest) but derive every drift-prone
+  label from runtime — and mark each node in the UI as *observed* vs *declared* so
+  a stale declaration is visible rather than silently trusted. Cheap runtime signal
+  available for free: `K_SERVICE`/`K_REVISION` env vars exist in Cloud Run, so the
+  live revision can be observed rather than declared.
 - Not agent-visible (UI only) → no matched pair (ground rule 6); verify like
   E1–E4: Playwright + real-data eyeball.
 
@@ -173,6 +222,29 @@ Phase F.
 **There is a proven method for exactly this** — don't invent one. C3
 (backlog §194–196) ran a usage census across **2,301 saved eval item-runs** and
 cut **15 → 12** tools. Re-run it on the current 12.
+
+**First evidence, read off the running app 2026-08-12 — the hunch holds.** The
+"Værktøjs-sundhed · 37 live-kørsler" table reports **115 tool calls across 8 tools**:
+
+| tool | calls | empty | mean |
+|---|---:|---:|---:|
+| `Contextual_Text_Retriever` | 76 | 3 % | 0,31 s |
+| `Regulering_Table_Lookup` | 15 | 0 % | 0,06 s |
+| `Skattesats_Opslag` | 14 | 7 % | 0,14 s |
+| `Read_Only_Cypher` | 4 | 25 % | 0,09 s |
+| `Graph_Schema_Navigator` | 2 | 0 % | 0,22 s |
+| `Legislation_Title_Resolver` | 2 | 0 % | 0,07 s |
+| `Legislation_Finder` | 1 | 0 % | 0,24 s |
+| `Citation_Network_Explorer` | 1 | 0 % | 0,22 s |
+
+**One tool is 66 % of all calls.** Four of the 12 never appear at all —
+`Supersedes_Network_Explorer`, `Superseded_By_Network_Explorer`,
+`Legislation_By_URI`, `Hierarchy_Path_Resolver` — and four more sit at ≤2 calls,
+which is indistinguishable from unused. `Read_Only_Cypher` returns **empty 25 %**
+of the time, the worst rate in the table.
+⚠ Caveats before anyone acts on this: it is **37 live chat runs, not eval runs**
+(a different and small sample), and it is **not split by substrate**. Treat it as
+the prompt for the census, not the census.
 
 - ☐ **Census.** Every eval record carries `tool_sequence` (app.py:1952, 2158;
   surfaced at server.py:1006 and in the lens's tool-health table), so this is a
