@@ -317,7 +317,52 @@ of the time, the worst rate in the table.
 (a different and small sample), and it is **not split by substrate**. Treat it as
 the prompt for the census, not the census.
 
-- ☐ **Census.** Every eval record carries `tool_sequence` (app.py:1952, 2158;
+### ☑ Census run 2026-08-12 — `scratchpad/g4_tool_census.py` (read-only, costs nothing)
+
+**3,865 item-records across 58 files** — a bigger base than C3's 2,301. Split by
+substrate, as C3's lesson requires.
+
+| substrate | records | baseline | tool calls | tools used |
+|---|---:|---:|---:|---:|
+| `gemma4:26b` | 2,406 | 43 % | 1,918 | 6 of 15 |
+| `gemini-2.5-flash` | 1,154 | 54 % | 1,914 | 11 of 15 |
+
+**Five tools do essentially all the work** on both substrates:
+`Contextual_Text_Retriever`, `Skattesats_Opslag`, `Regulering_Table_Lookup`,
+`Legislation_Finder`, `Legislation_Title_Resolver`.
+
+**Of the 12 active tools, two have never been called on any substrate, ever:**
+`Supersedes_Network_Explorer` and `Superseded_By_Network_Explorer`. (The other
+never-called names — `Citation_Counts`, `Text2Cypher_Expert` — are the C3-pruned
+ones, so their zeroes are expected.) Four more are statistically absent, all
+flash-only, all n≤2 across 3,865 records: `Graph_Schema_Navigator` (1),
+`Read_Only_Cypher` (1), `Hierarchy_Path_Resolver` (1), `Legislation_By_URI` (2).
+
+⚠ **The substrates genuinely disagree, and the sign flips** — exactly what C3
+warned pooling would hide:
+
+| tool | gemma (n) | flash (n) |
+|---|---|---|
+| `Legislation_Finder` | **+18** (105) | **−23** (13) |
+| `Legislation_Title_Resolver` | **+32** (60) | **−8** (44) |
+
+A pooled census would have averaged these to roughly nothing and concluded
+"no signal". Any keep/remove decision must be per substrate.
+
+⚠ **`Citation_Network_Explorer` is C1b in the data**: 10 calls, flash only, and
+**11 % pass-when-called (−43 vs baseline)**. So it is not merely unused — on the
+rare occasions flash reaches for it, those items do badly. n=9, so thin.
+
+⚠ **`pass|called` is a selection effect, not a causal claim.** The model chooses
+when to call a tool, so hard items attract certain tools. The column ranks
+candidates for investigation; it cannot on its own justify a removal.
+
+**Next step is a decision, not a deletion** — for each of the six absent tools:
+force the path and measure, or drop it. C1b is the precedent for the former.
+Removal is agent-visible → matched pair on both substrates first.
+
+- ☐ **Census.** (superseded by the run above; re-run after G1 adds fresh
+  per-substrate data.) Every eval record carries `tool_sequence` (app.py:1952, 2158;
   surfaced at server.py:1006 and in the lens's tool-health table), so this is a
   read-only pass over `eval_history/` — no API spend to get the counts.
   C3's decision rule stands: **0 calls ever → remove**; called-but-worse than the
