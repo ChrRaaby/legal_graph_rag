@@ -146,7 +146,12 @@ should face a fresh usage census.
   side by side in Historik; the run tile must make model + provider unmissable or
   the comparison silently misleads. Result files already carry the stamp.
 
-### G2. Eval UI rework ⏳ — detailing started 2026-08-12
+### G2. Eval UI rework ⏳ — **design doc written 2026-08-12, awaiting user go**
+
+**Design:** `whitepapers/eval_workspace_design.md` · **mockup:**
+`whitepapers/mockups/eval_workspace_mockup.html` (the mockup is the V1 contract,
+same convention as Phase E). Phasing: **G2a** = content fixes inside `Eval.tsx`
+(ships alone, kills the misleading defaults); **G2b** = the workspace split.
 
 Current shape is E4's: Eval tab split into *Testsuite* (browse + smoke runner) and
 *Historik* (past runs, matrix, items, fixtures, tool health).
@@ -189,9 +194,24 @@ ranked by how much they distort the analysis, not by how easy they are to fix:
 8. ☐ **Tool health is buried at the very bottom** of that nested scroll — yet with
    G4 it is currently the most decision-relevant table in the app. Promote it.
 
-**Still needed from the user:** which of the above are in scope, and whether they
-have their own complaints not on this list (the list is an inspection, not their
-brief).
+9. ☐ **The smoke-run execution card renders *below* the whole item table.** User's
+   own complaint 2026-08-12: "you need to scroll to find it". Root cause is DOM
+   order, not styling — `Eval.tsx:536-537` renders `<GoldenBrowser>` (which holds
+   the full 69-row table) and *then* `<RunnerPanel>`. The card must move above the
+   table, or beside it.
+
+**☑ Scope set by user 2026-08-12:** findings 1–6 and 9 are in (wrong defaults &
+scales · signal over noise · run navigation · the run card), **plus a dedicated
+full-height Eval mode** for finding 7.
+
+**☑ The user's framing — this is the load-bearing insight, not a styling
+preference:** *"kredsløb, graflinse and tankestrøm are tools to inspect and
+understand a single samtale. The stuff in eval is different — it is a list of test
+cases that can be explored and executed, and then you have the aggregated eval
+history."* That is exactly right and the README already says the first half: the
+three lenses are **pure functions of `(event_log, t)`** for one run. Eval has no
+event log and no `t`. **Eval is not a lens; it is a second workspace that was
+parked in the lens rail.** Design must follow that split — see G2-design below.
 
 ### G3. Architecture tab in Maskinrummet ☐
 

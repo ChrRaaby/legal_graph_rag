@@ -1,0 +1,366 @@
+<!doctype html>
+<html lang="da">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+<title>Eval-arbejdsrum — Skattegraf designmockup (G2)</title>
+<style>
+/* ── tokens: inherited verbatim from maskinrummet_mockup.html ──────────────── */
+:root{
+  --bg:#0b1220; --panel:#111b2c; --panel-2:#0e1728; --line:rgba(148,170,200,.14);
+  --ink:#e9eef5; --ink-2:#a7b4c6; --ink-3:#6c7a8f;
+  --accent:#e8a33d; --on-accent:#0b1220; --accent-dim:rgba(232,163,61,.16);
+  --llm:#9085e9; --tool:#199e70; --cites:#d55181;
+  --h-lov:#1c5cab; --h-kap:#2a78d6; --h-par:#3987e5; --h-stk:#86b6ef;
+  --good:#0ca30c; --bad:#d03b3b;
+  --glow:0 0 14px; --mono:ui-monospace,"Cascadia Code","SF Mono",Menlo,Consolas,monospace;
+  --serif:"Palatino Linotype",Palatino,"URW Palladio L",Georgia,serif;
+  --sans:system-ui,-apple-system,"Segoe UI",sans-serif;
+}
+@media (prefers-color-scheme: light){
+  :root:not([data-theme="dark"]){
+    --bg:#f7f6f2; --panel:#ffffff; --panel-2:#f1efe9; --line:rgba(20,32,46,.13);
+    --ink:#14202e; --ink-2:#4d5c6e; --ink-3:#8593a4;
+    --accent:#b87a17; --on-accent:#fffdf7; --accent-dim:rgba(184,122,23,.12);
+    --llm:#4a3aa7; --tool:#1baf7a; --cites:#c74e7e;
+    --h-lov:#104281; --h-kap:#1c5cab; --h-par:#2a78d6; --h-stk:#5598e7;
+  }
+}
+:root[data-theme="light"]{
+  --bg:#f7f6f2; --panel:#ffffff; --panel-2:#f1efe9; --line:rgba(20,32,46,.13);
+  --ink:#14202e; --ink-2:#4d5c6e; --ink-3:#8593a4;
+  --accent:#b87a17; --on-accent:#fffdf7; --accent-dim:rgba(184,122,23,.12);
+  --llm:#4a3aa7; --tool:#1baf7a; --cites:#c74e7e;
+  --h-lov:#104281; --h-kap:#1c5cab; --h-par:#2a78d6; --h-stk:#5598e7;
+}
+*{box-sizing:border-box}
+html,body{margin:0;padding:0}
+body{background:var(--bg);color:var(--ink);font:14px/1.55 var(--sans)}
+button{font:inherit;color:inherit;background:none;border:none;cursor:pointer}
+button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+.app{max-width:1440px;margin:0 auto;padding:14px 18px 22px;display:flex;flex-direction:column;gap:12px;min-height:100vh}
+
+/* ── header + the workspace switch (THE structural change) ─────────────────── */
+header{display:flex;align-items:center;gap:16px;flex-wrap:wrap;padding:4px 2px}
+.brand{font-family:var(--serif);font-size:22px;letter-spacing:.2px}
+.brand .par{color:var(--accent);margin-right:6px}
+.ws{display:flex;gap:2px;border:1px solid var(--line);border-radius:9px;padding:2px;background:var(--panel-2)}
+.ws button{padding:5px 15px;border-radius:7px;font-size:12.5px;color:var(--ink-2);letter-spacing:.3px}
+.ws button[aria-current="true"]{background:var(--accent-dim);color:var(--accent);font-weight:600}
+.badges{margin-left:auto;display:flex;gap:8px;align-items:center}
+.badge{font-size:11.5px;color:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:3px 10px;letter-spacing:.3px}
+.badge b{color:var(--ink);font-weight:600}
+.badge.mode{background:var(--accent-dim);border-color:transparent;color:var(--accent)}
+
+.panel{background:var(--panel);border:1px solid var(--line);border-radius:10px;display:flex;flex-direction:column;min-width:0}
+.panel-h{display:flex;align-items:center;gap:10px;padding:9px 14px;border-bottom:1px solid var(--line);font-size:12px;color:var(--ink-3);letter-spacing:.6px;text-transform:uppercase}
+.spacer{margin-left:auto}
+
+/* ── the Eval workspace: full height, no chat pane ─────────────────────────── */
+.workspace{flex:1;display:flex;flex-direction:column;gap:12px;min-height:0}
+.subnav{display:flex;gap:2px;align-items:center}
+.subnav button{padding:6px 14px;border-radius:7px;font-size:13px;color:var(--ink-2)}
+.subnav button[aria-selected="true"]{background:var(--accent-dim);color:var(--accent);font-weight:600}
+.subnav .n{font-size:10.5px;color:var(--ink-3);margin-left:5px;font-variant-numeric:tabular-nums}
+.view{display:none;flex:1;min-height:0}
+.view.active{display:flex;gap:12px}
+
+/* ── Testsæt: table left, execution rail right ─────────────────────────────── */
+.corpus{flex:1;min-width:0}
+.rail{width:340px;flex:0 0 340px}
+.toolbar{display:flex;gap:8px;padding:10px 12px;border-bottom:1px solid var(--line);align-items:center;flex-wrap:wrap}
+.inp{flex:1;min-width:150px;border:1px solid var(--line);border-radius:8px;padding:7px 11px;background:var(--panel-2);color:var(--ink-3);font-size:12.5px}
+.sel{border:1px solid var(--line);border-radius:8px;padding:7px 11px;background:var(--panel-2);color:var(--ink-2);font-size:12.5px}
+.btn{background:var(--accent);color:var(--on-accent);border-radius:8px;padding:7px 15px;font-size:12.5px;font-weight:600}
+.btn[disabled]{opacity:.4;cursor:not-allowed}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink-2);font-weight:400}
+.scroll{overflow-y:auto;flex:1;min-height:0}
+table{width:100%;border-collapse:collapse;font-size:12.5px}
+th{position:sticky;top:0;background:var(--panel);text-align:left;font-weight:500;font-size:10.5px;letter-spacing:.6px;
+   text-transform:uppercase;color:var(--ink-3);padding:8px 10px;border-bottom:1px solid var(--line);z-index:1}
+td{padding:7px 10px;border-bottom:1px solid var(--line);color:var(--ink-2);vertical-align:top}
+tr:hover td{background:var(--panel-2)}
+td.q{color:var(--ink)}
+.num{text-align:right;font-variant-numeric:tabular-nums}
+.id{font-family:var(--mono);font-size:11.5px;color:var(--ink-3)}
+.tag{display:inline-block;font-size:10.5px;border:1px solid var(--line);border-radius:999px;padding:1px 7px;color:var(--ink-3);margin-right:4px}
+.foot{border-top:1px solid var(--line);padding:9px 12px;display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ink-3)}
+
+/* execution rail */
+.rail .empty{padding:22px 16px;color:var(--ink-3);font-size:12.5px;line-height:1.6}
+.run-head{padding:11px 13px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:9px}
+.dot{width:8px;height:8px;border-radius:50%;background:var(--accent);animation:pulse 1.2s ease-in-out infinite}
+@keyframes pulse{50%{opacity:.25}}
+.run-title{font-size:12.5px;color:var(--ink)}
+.bar{height:3px;background:var(--panel-2);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);width:60%;transition:width .4s}
+.vd{display:flex;align-items:center;gap:9px;padding:8px 13px;border-bottom:1px solid var(--line);font-size:12.5px}
+.vd .id{flex:0 0 52px}
+.vd .st{width:15px;height:15px;border-radius:50%;flex:0 0 15px;display:grid;place-items:center;font-size:10px;color:#fff}
+.vd .st.ok{background:var(--good)} .vd .st.no{background:var(--bad)} .vd .st.wait{background:var(--ink-3)}
+.vd .ms{margin-left:auto;font-variant-numeric:tabular-nums;color:var(--ink-3);font-size:11.5px}
+.totals{padding:11px 13px;display:flex;flex-direction:column;gap:5px;font-size:12px;color:var(--ink-2);border-bottom:1px solid var(--line)}
+.totals b{color:var(--ink)}
+.door{margin:11px 13px;display:block;text-align:center;border:1px solid var(--accent);color:var(--accent);
+      border-radius:8px;padding:8px;font-size:12.5px}
+
+/* ── Historik ──────────────────────────────────────────────────────────────── */
+.hist{flex-direction:column;gap:12px;overflow-y:auto}
+.pickers{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.pick-h{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3);padding:9px 12px 0}
+.pick-search{margin:8px 12px;border:1px solid var(--line);border-radius:7px;padding:6px 10px;background:var(--panel-2);
+             color:var(--ink-3);font-size:12px}
+.grp{font-size:10.5px;letter-spacing:.5px;text-transform:uppercase;color:var(--ink-3);padding:7px 12px 3px;
+     background:var(--panel-2);border-top:1px solid var(--line)}
+.opt{padding:6px 12px;font-size:12.5px;color:var(--ink-2);display:flex;gap:9px;align-items:baseline;cursor:pointer}
+.opt:hover{background:var(--panel-2)}
+.opt[aria-selected="true"]{background:var(--accent-dim);color:var(--accent)}
+.opt .pct{font-variant-numeric:tabular-nums;font-weight:600;margin-left:auto}
+.opt .meta{font-size:11px;color:var(--ink-3)}
+.opt .new{font-size:9.5px;border:1px solid var(--accent);color:var(--accent);border-radius:999px;padding:0 6px}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px}
+.tile{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 13px}
+.tile .v{font-size:23px;font-weight:600;letter-spacing:-.4px;font-variant-numeric:tabular-nums}
+.tile .v small{font-size:12px;color:var(--ink-3);font-weight:400}
+.tile .k{font-size:10.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--ink-3);margin-top:3px}
+
+.gap-pos{color:var(--good)} .gap-neg{color:var(--bad)}
+tr.thin td{color:var(--ink-3)}
+tr.thin td.q{color:var(--ink-3)}
+.n-warn{font-size:10px;color:var(--ink-3);border:1px solid var(--line);border-radius:999px;padding:0 6px;margin-left:6px}
+.note{font-size:11.5px;color:var(--ink-3);padding:8px 13px;line-height:1.6}
+.callout{border-left:2px solid var(--accent);padding:3px 0 3px 11px;margin:9px 13px;font-size:11.5px;color:var(--ink-2)}
+
+/* annotation ribbons so the mockup explains its own decisions */
+.why{position:relative;border:1px dashed var(--line);border-radius:10px}
+.why::after{content:attr(data-why);position:absolute;top:-9px;left:13px;background:var(--bg);padding:0 8px;
+            font-size:10px;letter-spacing:.5px;text-transform:uppercase;color:var(--accent)}
+@media (max-width:1100px){
+  .view.active{flex-direction:column}
+  .rail{width:auto;flex:none;order:-1}   /* narrow: card goes ON TOP, never below */
+  .pickers{grid-template-columns:1fr}
+}
+</style>
+
+<div class="app">
+  <header>
+    <div class="brand"><span class="par">§</span>Skattegraf</div>
+    <nav class="ws" aria-label="Arbejdsrum">
+      <button onclick="ws('samtale')" id="ws-samtale">Samtale</button>
+      <button onclick="ws('eval')" id="ws-eval" aria-current="true">Eval</button>
+    </nav>
+    <div class="badges">
+      <span class="badge">LLM <b>gemini:gemini-3.5-flash</b></span>
+      <span class="badge">Sæt <b>v4.2 · 69</b></span>
+      <span class="badge mode">dev-tilstand</span>
+    </div>
+  </header>
+
+  <div class="workspace">
+    <div class="subnav">
+      <button id="t-testsaet" aria-selected="true" onclick="view('testsaet')">Testsæt<span class="n">69</span></button>
+      <button id="t-historik" onclick="view('historik')">Historik<span class="n">41</span></button>
+      <span class="spacer"></span>
+      <span class="note">Fuld højde — Eval er ikke en linse over én samtale.</span>
+    </div>
+
+    <!-- ══ TESTSÆT ═══════════════════════════════════════════════════════════ -->
+    <section class="view active" id="v-testsaet">
+      <div class="panel corpus">
+        <div class="toolbar">
+          <div class="inp">Søg i spørgsmål, facit, noter, tags …</div>
+          <div class="sel">søjle ▾</div>
+          <div class="sel">adfærd ▾</div>
+          <div class="sel">tags ▾</div>
+        </div>
+        <div class="scroll">
+          <table>
+            <thead><tr><th style="width:26px"></th><th>ID</th><th>Spørgsmål</th><th>Adfærd</th><th>Tags</th></tr></thead>
+            <tbody>
+              <tr><td>☑</td><td class="id">gs-001</td><td class="q">Kan jeg få kørselsfradrag når jeg cykler på arbejde?</td><td>answer</td><td><span class="tag">befordring</span></td></tr>
+              <tr><td>☑</td><td class="id">gs-002</td><td class="q">Hvad er skattesatsen for aktieindkomst op til progressionsgrænsen i 2025?</td><td>answer</td><td><span class="tag">aktieindkomst</span></td></tr>
+              <tr><td>☑</td><td class="id">gs-003</td><td class="q">Hvornår er en gave fra en arbejdsgiver skattepligtig i 2025?</td><td>answer</td><td><span class="tag">bagatelgrænse</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-004</td><td class="q">Hvordan beregnes værdien af fri bil stillet til rådighed af arbejdsgiver?</td><td>answer</td><td><span class="tag">fri_bil</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-005</td><td class="q">Hvad er selskabsskattesatsen i Danmark?</td><td>answer</td><td><span class="tag">selskabsskat</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-006</td><td class="q">Hvad er momssatsen i Danmark?</td><td>answer</td><td><span class="tag">moms</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-007</td><td class="q">Hvem skal betale boafgift, og hvad er bundfradraget?</td><td>answer</td><td><span class="tag">boafgiftsloven</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-008</td><td class="q">Er der stadig fradrag for indbetalinger til kapitalpension?</td><td>correct_premise</td><td><span class="tag">afskaffet_lovgivning</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-009</td><td class="q">Hvad siger ligningslovens § 7 P om medarbejderaktier?</td><td>answer</td><td><span class="tag">LL_7P</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-010</td><td class="q">Hvornår indtræder fuld skattepligt efter 183-dages-reglen?</td><td>answer</td><td><span class="tag">183_dages_regel</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-011</td><td class="q">Kan du anbefale mig en god skatterådgiver i København?</td><td>refuse</td><td><span class="tag">uden_for_skat</span></td></tr>
+              <tr><td>☐</td><td class="id">gs-012</td><td class="q">Hvad bliver skattesatsen for aktieindkomst i 2031?</td><td>admit_unknown</td><td><span class="tag">fremtid</span></td></tr>
+            </tbody>
+          </table>
+        </div>
+        <div class="foot">
+          <b style="color:var(--ink)">3 valgt</b>
+          <button class="btn" onclick="startRun()">Kør smoke</button>
+          <span>Smoke-tier: 1–5 items, koster rigtige API-kald. Fulde matched pairs hører til CLI (<span style="font-family:var(--mono)">eval_run.py</span>).</span>
+        </div>
+      </div>
+
+      <!-- the execution rail: the fix for "kortet ligger nederst" -->
+      <aside class="panel rail why" data-why="kørselskort">
+        <div id="rail-empty" class="empty">
+          Vælg items til venstre og tryk <b style="color:var(--ink)">Kør smoke</b>.<br><br>
+          Kørslen vises <b style="color:var(--ink)">her</b> — ved siden af listen, ikke under den.
+          Du kan følge hvert item mens tabellen bliver stående.
+        </div>
+        <div id="rail-run" style="display:none;flex:1;min-height:0;flex-direction:column">
+          <div class="run-head">
+            <span class="dot"></span>
+            <span class="run-title">Kører <b id="prog">1/3</b></span>
+            <span class="spacer"></span>
+            <button class="btn ghost" style="padding:3px 10px;font-size:11.5px" onclick="stopRun()">Afbryd</button>
+          </div>
+          <div style="padding:0 13px 10px"><div class="bar"><i id="barfill" style="width:33%"></i></div></div>
+          <div class="scroll" id="verdicts"></div>
+          <div class="totals">
+            <div>Bestået <b id="passed">0 / 0</b></div>
+            <div>Forbrug <b id="usage">— tok · — kr.</b></div>
+            <div>Substrat <b>gemini-3.5-flash</b></div>
+          </div>
+          <a class="door" href="#" onclick="return doorway()">vis forløbet i Samtale →</a>
+        </div>
+      </aside>
+    </section>
+
+    <!-- ══ HISTORIK ══════════════════════════════════════════════════════════ -->
+    <section class="view hist" id="v-historik">
+      <div class="pickers">
+        <div class="panel why" data-why="kørsel">
+          <div class="pick-h">Kørsel</div>
+          <div class="pick-search">søg substrat, sætversion, dato …</div>
+          <div class="grp">Gemini 3.5-flash</div>
+          <div class="opt" aria-selected="true"><span>2026-08-09</span><span class="meta">v4.2 · 1×</span><span class="new">nyest</span><span class="pct">—</span></div>
+          <div class="grp">Gemma4:26b · lokal</div>
+          <div class="opt"><span>2026-08-08</span><span class="meta">v4.2 · 1×</span><span class="pct">52 %</span></div>
+          <div class="opt"><span>2026-08-08</span><span class="meta">v4.2 · 1×</span><span class="pct">49 %</span></div>
+          <div class="opt"><span>2026-08-07</span><span class="meta">v4.2 · 1×</span><span class="pct">64 %</span></div>
+          <div class="grp">Gemini 2.5-flash</div>
+          <div class="opt"><span>2026-07-09</span><span class="meta">v4.1 · 1×</span><span class="pct">72 %</span></div>
+          <div class="opt"><span>2026-07-05</span><span class="meta">v4 · 5×</span><span class="pct">68 %</span></div>
+          <div class="grp">Smoke &amp; debug · foldet sammen</div>
+          <div class="opt" style="color:var(--ink-3)"><span>7 kørsler med &lt; 15 items</span><span class="pct">vis</span></div>
+        </div>
+        <div class="panel why" data-why="sammenlign">
+          <div class="pick-h">Sammenlign</div>
+          <div class="pick-search">søg substrat, sætversion, dato …</div>
+          <div class="grp">Gemma4:26b · lokal</div>
+          <div class="opt" aria-selected="true"><span>2026-08-08</span><span class="meta">v4.2 · 1×</span><span class="pct">52 %</span></div>
+          <div class="opt"><span>2026-08-07</span><span class="meta">v4.2 · 1×</span><span class="pct">64 %</span></div>
+          <div class="grp">Gemini 2.5-flash</div>
+          <div class="opt"><span>2026-07-09</span><span class="meta">v4.1 · 1×</span><span class="pct">72 %</span></div>
+          <div class="callout">Kun kørsler på <b>samme sætversion</b> kan sammenlignes tal-for-tal. v4.1 vises, men markeres.</div>
+        </div>
+      </div>
+
+      <div class="tiles">
+        <div class="tile"><div class="v">52 <small>%</small></div><div class="k">Beståelse · 36/69</div></div>
+        <div class="tile"><div class="v">69</div><div class="k">Items · sæt v4.2</div></div>
+        <div class="tile"><div class="v">1<small>×</small></div><div class="k">Kørsler</div></div>
+        <div class="tile"><div class="v">579</div><div class="k">Værktøjskald</div></div>
+        <div class="tile"><div class="v">0,84 <small>kr.</small></div><div class="k">Forbrug</div></div>
+      </div>
+      <div class="note" style="padding:0 2px">Tomme felter (app-commit, forbrug) foldes væk i stedet for at stå som «—».</div>
+
+      <!-- tool health promoted: G4 needs it, and it was buried at the bottom -->
+      <div class="panel why" data-why="flyttet op — G4">
+        <div class="panel-h">Værktøjs-sundhed<span class="spacer"></span><span style="text-transform:none;letter-spacing:0">115 kald · 4 af 12 værktøjer aldrig kaldt</span></div>
+        <table>
+          <thead><tr><th>Værktøj</th><th class="num">kald</th><th class="num">andel</th><th class="num">tomme svar</th><th class="num">middel-tid</th></tr></thead>
+          <tbody>
+            <tr><td class="q">Contextual_Text_Retriever</td><td class="num">76</td><td class="num">66 %</td><td class="num">3 %</td><td class="num">0,31 s</td></tr>
+            <tr><td class="q">Regulering_Table_Lookup</td><td class="num">15</td><td class="num">13 %</td><td class="num">0 %</td><td class="num">0,06 s</td></tr>
+            <tr><td class="q">Skattesats_Opslag</td><td class="num">14</td><td class="num">12 %</td><td class="num">7 %</td><td class="num">0,14 s</td></tr>
+            <tr><td class="q">Read_Only_Cypher</td><td class="num">4</td><td class="num">3 %</td><td class="num gap-neg">25 %</td><td class="num">0,09 s</td></tr>
+            <tr class="thin"><td class="q">Graph_Schema_Navigator<span class="n-warn">n=2</span></td><td class="num">2</td><td class="num">2 %</td><td class="num">0 %</td><td class="num">0,22 s</td></tr>
+            <tr class="thin"><td class="q">Legislation_Title_Resolver<span class="n-warn">n=2</span></td><td class="num">2</td><td class="num">2 %</td><td class="num">0 %</td><td class="num">0,07 s</td></tr>
+            <tr class="thin"><td class="q">Legislation_Finder<span class="n-warn">n=1</span></td><td class="num">1</td><td class="num">1 %</td><td class="num">0 %</td><td class="num">0,24 s</td></tr>
+            <tr class="thin"><td class="q">Citation_Network_Explorer<span class="n-warn">n=1</span></td><td class="num">1</td><td class="num">1 %</td><td class="num">0 %</td><td class="num">0,22 s</td></tr>
+            <tr class="thin"><td class="q" colspan="5" style="color:var(--bad)">Aldrig kaldt: Supersedes_Network_Explorer · Superseded_By_Network_Explorer · Legislation_By_URI · Hierarchy_Path_Resolver</td></tr>
+          </tbody>
+        </table>
+        <div class="note">Kilde markeres eksplicit: <b>live-samtaler</b> eller <b>eval-kørsler</b> — og altid per substrat. De to må ikke lægges sammen.</div>
+      </div>
+
+      <div class="panel why" data-why="sorteret efter forskel, ikke a–å">
+        <div class="panel-h">Tags · fokusområder<span class="spacer"></span><span style="text-transform:none;letter-spacing:0">sorteret efter største forskel</span></div>
+        <table>
+          <thead><tr><th>Dimension</th><th class="num">3.5-flash</th><th class="num">26b</th><th class="num">forskel</th><th class="num">items</th></tr></thead>
+          <tbody>
+            <tr><td class="q">correct_premise</td><td class="num">43 %</td><td class="num">86 %</td><td class="num gap-pos">+43</td><td class="num">35</td></tr>
+            <tr><td class="q">adversarial</td><td class="num">46 %</td><td class="num">71 %</td><td class="num gap-pos">+25</td><td class="num">35</td></tr>
+            <tr><td class="q">admit_unknown</td><td class="num">84 %</td><td class="num">60 %</td><td class="num gap-neg">−24</td><td class="num">25</td></tr>
+            <tr><td class="q">hallucination_check</td><td class="num">87 %</td><td class="num">67 %</td><td class="num gap-neg">−20</td><td class="num">30</td></tr>
+            <tr><td class="q">aktieavancebeskatningsloven</td><td class="num">50 %</td><td class="num">50 %</td><td class="num">0</td><td class="num">20</td></tr>
+            <tr class="thin"><td class="q">armslængde<span class="n-warn">n=5</span></td><td class="num">20 %</td><td class="num">—</td><td class="num">—</td><td class="num">5</td></tr>
+            <tr class="thin"><td class="q">bagatelgrænse<span class="n-warn">n=5</span></td><td class="num">20 %</td><td class="num">—</td><td class="num">—</td><td class="num">5</td></tr>
+            <tr class="thin"><td class="q">aktietab<span class="n-warn">n=5</span></td><td class="num">0 %</td><td class="num">—</td><td class="num">—</td><td class="num">5</td></tr>
+          </tbody>
+        </table>
+        <div class="note">Rækker med <b>n &lt; 10</b> dæmpes og mærkes — 0 % ved n=5 er støj, ikke et fund.
+          Et item tæller i hvert af sine tags, så totalerne er item-tag-par.</div>
+      </div>
+
+      <div class="panel">
+        <div class="panel-h">Items<span class="spacer"></span><span style="text-transform:none;letter-spacing:0">klik en række → vis forløbet i Samtale</span></div>
+        <div class="note">Kategori-, adfærd-, søjle- og sværhedsgrad-matricerne følger her, uændret i indhold.</div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<script>
+const items=[["gs-001",1,"0,9 s"],["gs-002",1,"1,2 s"],["gs-003",0,"1,1 s"]];
+let timer=null;
+function ws(which){
+  document.getElementById('ws-samtale').setAttribute('aria-current', which==='samtale');
+  document.getElementById('ws-eval').setAttribute('aria-current', which==='eval');
+  if(which==='samtale') alert('Mockup: her skiftes til Samtale-arbejdsrummet — chat + Kredsløb / Graflinse / Tankestrøm over ét forløb.');
+}
+function view(v){
+  for(const n of ['testsaet','historik']){
+    document.getElementById('v-'+n).classList.toggle('active', n===v);
+    document.getElementById('t-'+n).setAttribute('aria-selected', n===v);
+  }
+}
+function startRun(){
+  document.getElementById('rail-empty').style.display='none';
+  const r=document.getElementById('rail-run'); r.style.display='flex';
+  const vd=document.getElementById('verdicts'); vd.innerHTML=''; let i=0, pass=0;
+  clearInterval(timer);
+  timer=setInterval(()=>{
+    if(i>=items.length){
+      clearInterval(timer);
+      document.querySelector('.dot').style.animation='none';
+      document.querySelector('.run-title').innerHTML='Færdig <b>'+items.length+'/'+items.length+'</b>';
+      return;
+    }
+    const [id,ok,ms]=items[i]; pass+=ok; i++;
+    vd.insertAdjacentHTML('beforeend',
+      '<div class="vd"><span class="id">'+id+'</span><span class="st '+(ok?'ok':'no')+'">'+(ok?'✓':'✗')+
+      '</span><span>'+(ok?'bestået':'fejlet')+'</span><span class="ms">'+ms+'</span></div>');
+    document.getElementById('prog').textContent=i+'/'+items.length;
+    document.getElementById('barfill').style.width=(i/items.length*100)+'%';
+    document.getElementById('passed').textContent=pass+' / '+i;
+    document.getElementById('usage').textContent=
+      (i*1604).toLocaleString('da-DK')+' tok · '+(i*0.07).toFixed(2).replace('.',',')+' kr.';
+  },900);
+}
+function stopRun(){
+  clearInterval(timer);
+  document.getElementById('rail-run').style.display='none';
+  document.getElementById('rail-empty').style.display='block';
+}
+function doorway(){
+  alert('Mockup: skifter til Samtale-arbejdsrummet med dette forløb indlæst — Kredsløb, Graflinse, Tankestrøm og Tidslinjen scrubber det som enhver anden samtale.\n\nDette er den ene dør mellem de to arbejdsrum.');
+  return false;
+}
+</script>
+</body>
+</html>
