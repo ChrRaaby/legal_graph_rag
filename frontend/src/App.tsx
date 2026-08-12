@@ -135,20 +135,25 @@ export default function App() {
                 value={arch.provider}
                 onChange={(e) => {
                   const newProvider = e.target.value;
+                  const previous = arch.provider;
                   setArch({ ...arch, provider: newProvider });
-                  setProvider(newProvider).catch(() => {
-                    // Revert on error
-                    setArch({ ...arch });
-                  });
+                  // Revert the label if the switch was refused, so the header can
+                  // never claim a substrate the agent is not running.
+                  setProvider(newProvider)
+                    .then((r) => { if (r?.provider) setArch((a) => (a ? { ...a, provider: r.provider } : a)); })
+                    .catch(() => setArch((a) => (a ? { ...a, provider: previous } : a)));
                 }}
                 aria-label="Vælg LLM model"
               >
-                <option value="gemini:gemini-3.5-flash-lite">gemini-3.5-flash-lite</option>
-                <option value="gemini:gemini-3.6-flash">gemini-3.6-flash</option>
-                <option value="gemini:gemini-3.1-pro">gemini-3.1-pro</option>
-                <option value="gemini:gemma-4-31b-it">gemma-4-31b-it (Gemini API)</option>
-                <option value="gemini:gemma-4-26b-a4b-it">gemma-4-26b-a4b-it (Gemini API)</option>
-                <option value="ollama">gemma4:26b (Ollama)</option>
+                {/* Served from GEMINI_MODELS — the same allowlist the resolver
+                    enforces. Hardcoding it had drifted: two entries were absent
+                    from the allowlist (silently ignored) and gemini-3.1-pro is
+                    not a real model id. */}
+                {(arch.providers ?? [arch.provider]).map((p) => (
+                  <option key={p} value={p}>
+                    {p === "ollama" ? "gemma4:26b (Ollama, lokal)" : p.replace("gemini:", "")}
+                  </option>
+                ))}
               </select>
             </span>
           )}

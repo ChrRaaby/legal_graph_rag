@@ -172,6 +172,10 @@ export interface ToolHealthRow {
 export interface Architecture {
   app_mode: "user" | "dev";
   provider: string;
+  /** Concrete model behind `provider` (ollama's provider string omits it). */
+  model?: string;
+  /** Selectable substrates, from the allowlist the server actually enforces. */
+  providers?: string[];
   graph_stats: { legislation: number; sections: number; error?: string };
   tools: ToolInfo[];
   // Server-supplied price table (app.py is the single source).
@@ -198,15 +202,18 @@ export async function fetchArchitecture(): Promise<Architecture> {
   return arch;
 }
 
-export async function setProvider(provider: string): Promise<string> {
+export async function setProvider(provider: string): Promise<{ provider: string; model?: string }> {
   const res = await fetch("/api/provider", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ provider }),
   });
-  if (!res.ok) throw new Error(`provider ${res.status}`);
-  const data = await res.json();
-  return data.provider;
+  const data = await res.json().catch(() => ({}));
+  // The server refuses a model outside its allowlist rather than silently
+  // running a different one, so a 400 here must propagate — the caller reverts
+  // the label instead of leaving the UI claiming an unused substrate.
+  if (!res.ok) throw new Error(data?.error || `provider ${res.status}`);
+  return data;
 }
 
 export async function setAppMode(appMode: "dev" | "user"): Promise<string> {

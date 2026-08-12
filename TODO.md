@@ -507,8 +507,26 @@ Scope decisions to respect:
   gitignore or archive the rest.
 - 🔒 **Newer models now listed**: `gemini-3.6-flash`, `gemini-3-pro-preview`. Switching
   is a **substrate change** — matched pair required, not a config edit.
-  → User approved a **full 3.6-flash run** 2026-08-12 (**G1**). Approval covers the
-  run; switching the default substrate still needs the pair.
+  → User approved a **full 3.6-flash run** 2026-08-12 (**G1**), then asked that the app
+  actually run on it. **`.env` now defaults to `gemini:gemini-3.6-flash`** (both
+  `LLM_PROVIDER` and `GEMINI_MODEL`, kept in sync — they contradicted each other once
+  before, see above). ⚠ **The matched pair is still owed**: the default moved on the
+  user's instruction, not on evidence. Nothing has yet measured 3.6 against 3.5.
+
+- ☑ **The model switcher was reporting a substrate it wasn't running** — found
+  2026-08-12 while checking the above. `resolve_llm_provider()` silently *discards*
+  an argument outside its `GEMINI_MODELS` allowlist and falls back to the env
+  default, while `/api/provider` set `PROVIDER` (the label) to whatever was asked.
+  **3 of the 6 hardcoded dropdown options were affected** — `gemini-3.6-flash` and
+  `gemini-3.5-flash-lite` were absent from the allowlist, and `gemini-3.1-pro` is
+  not a real model id at all (it is `gemini-3.1-pro-preview`). Selecting any of
+  them relabelled the header while the agent kept running 3.5-flash — the exact
+  silent-substrate lie Kredsløbet exists to prevent, sitting in the header above it.
+  Fixed three ways: `/api/provider` **refuses** an unresolvable model (400) instead
+  of pretending; `/api/architecture` serves the enforced allowlist and the frontend
+  renders the dropdown from it, so it cannot drift again; the allowlist gained the
+  two real ids. Verified against the live API: `model_name: gemini-3.6-flash` in the
+  response metadata, with a bogus id 404-ing as a control.
 
 ---
 

@@ -49,6 +49,7 @@ from app import (  # noqa: E402
     build_runtime, stream_agent_answer, resolve_llm_provider, resolve_run_model,
     redact_if_pii,
     token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK, EVAL_HISTORY_DIR,
+    GEMINI_MODELS,
 )
 
 from fastapi import FastAPI, Request  # noqa: E402
@@ -137,6 +138,13 @@ def _architecture() -> dict:
     return {
         "app_mode": APP_MODE,
         "provider": PROVIDER,
+        "model": RUN_MODEL,
+        # The selectable substrates, straight from the allowlist the resolver
+        # actually enforces. The frontend used to hardcode this list, which had
+        # already drifted: it offered gemini-3.6-flash and gemini-3.5-flash-lite
+        # (absent from GEMINI_MODELS, so silently ignored) and gemini-3.1-pro
+        # (not a real model id at all — it is gemini-3.1-pro-preview).
+        "providers": ["ollama"] + [f"gemini:{m}" for m in GEMINI_MODELS],
         "graph_stats": _graph_stats(),
         "tools": [{"name": t.name, "description": (t.description or "")} for t in AGENT_TOOLS],
         # Pricing is served from app.py's single table so the UI never carries
@@ -617,15 +625,31 @@ async def ask(request: Request):
 
 @app.post("/api/provider")
 async def set_provider(request: Request):
-    global PROVIDER, ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS
+    global PROVIDER, RUN_MODEL, ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS
     body = await request.json()
     new_provider = body.get("provider")
     if not new_provider:
         return JSONResponse({"error": "missing provider"}, status_code=400)
+
+    # `resolve_llm_provider` DISCARDS an argument that is not in its allowlist and
+    # falls back to the env default. Combined with the old `PROVIDER = new_provider`
+    # below, asking for a model outside GEMINI_MODELS relabelled the UI while the
+    # agent kept running the previous substrate — the exact silent-substrate lie
+    # Kredsløbet exists to prevent. Refuse instead of pretending.
+    resolved = resolve_llm_provider(new_provider)
+    if resolved != new_provider:
+        return JSONResponse(
+            {"error": f"ukendt model {new_provider!r} — ikke i GEMINI_MODELS. "
+                      f"Tilføj den i .env først; ellers ville UI'et vise "
+                      f"{new_provider!r} mens agenten kørte {resolved!r}.",
+             "resolved": resolved},
+            status_code=400,
+        )
     try:
         ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS = build_runtime(new_provider)
         PROVIDER = new_provider
-        return JSONResponse({"status": "ok", "provider": PROVIDER})
+        RUN_MODEL = resolve_run_model(new_provider)
+        return JSONResponse({"status": "ok", "provider": PROVIDER, "model": RUN_MODEL})
     except Exception as exc:
         return JSONResponse({"error": str(exc)}, status_code=500)
 
