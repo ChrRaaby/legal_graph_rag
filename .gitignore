@@ -28,3 +28,4 @@ eval_history/*.log
 !eval_history/eval_fixtures_baseline.jsonl
 !eval_history/eval_fixtures_scope_baseline.jsonl
 !eval_history/README.md
+uvicorn.log
