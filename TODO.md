@@ -92,6 +92,83 @@ Deterministic half had already shown zero regression on never-gated items
 
 ---
 
+## Phase G — live app: real eval runs, eval UI rework, architecture tab (NEW, user request 2026-08-12)
+
+**Goal:** the deployed service should show at least one *full* eval run (not just
+smoke), the Eval lens should be reworked, and Maskinrummet should gain an
+architecture tab covering the whole solution including its GCP substrate.
+
+**State verified against the live service 2026-08-12** (project
+`gen-lang-client-0167283966`, service `legal-graph-rag`, europe-west1, revision
+`legal-graph-rag-00012-mqf` serving 100 %):
+- The GCS read path **already exists** — `/api/eval/runs` and `/api/eval/runs/{name}`
+  fall back to bucket `gen-lang-client-0167283966-eval-history`, prefix
+  `eval_history/` (server.py:911–971), and fixtures likewise (server.py:1028).
+  So the 2026-08-09 gate note ("`/api/eval/runs` returns `[]`") is **stale** —
+  persistence landed in `54fb7af`/`58fd7e7`.
+- What the bucket actually holds: **4 objects** — 2 fixture baselines and 2 smoke
+  runs (`eval_results_smoke_20260810/11.jsonl`). Smoke is capped at 5 items, so
+  **there is still no full-50 run live.** 57 full run files sit in local
+  `eval_history/`.
+- `migrate_to_gcp.py` migrates **only** `mr_runs` + `mr_feedback` to Firestore.
+  It does **not** upload eval jsonl. Nothing in the repo does.
+
+### G1. Get a full eval run visible in the live app ☐
+
+- ☐ **Upload path for eval artefacts.** One-shot `gcloud storage cp` is enough to
+  unblock, but the repeatable fix is extending `migrate_to_gcp.py` (or the
+  eval runner's writer at server.py:1205, which already uploads smoke results) to
+  push a chosen full run. Decide: upload *all* 57, or a curated few? The lens
+  scans every blob under the prefix, so bulk upload changes what the Historik tab
+  shows by default.
+- ☐ **Decide how the run is reachable in `APP_MODE=user`.** The Eval tab is hidden
+  entirely in user mode (`showMaskinrum = isDev || revealed`, handover doc §67);
+  the live service runs user mode. Options: reveal Eval read-only in user mode,
+  add a dev-only route, or flip the live `APP_MODE`. **User call.**
+- ☐ **Run 1 — `gemini-3.6-flash`, full 50.** ⚠ This lifts the 🔒 gate at the
+  bottom of this file ("Newer models now listed … switching is a **substrate
+  change**"): user asked for it 2026-08-12, so it is approved *as a run*, but
+  ground rule 6 still applies — it is a **matched pair**, not a one-off, if the
+  result is ever used to justify switching the default substrate. Costs API money.
+  Pin the full model id, never an alias (traps-index rule).
+- ☐ **Run 2 — on-prem gemma, full 50.** ⚠ Cannot execute *in* Cloud Run: no GPU,
+  and `OLLAMA_BASE_URL` points at the local box. The run happens **locally**, the
+  result file is uploaded, and the live app shows it as historical data. Note the
+  reproducibility rule from F3: unload/reload the model between cells, never
+  back-to-back.
+- ☐ **Label the substrate in the UI.** Two runs on different substrates will sit
+  side by side in Historik; the run tile must make model + provider unmissable or
+  the comparison silently misleads. Result files already carry the stamp.
+
+### G2. Eval UI rework ☐ — **needs requirements before it can start**
+
+User wants the Eval lens "reworked a bit" (2026-08-12). The current shape is E4's:
+Eval tab split into *Testsuite* (browse + smoke runner) and *Historik* (past runs,
+matrix, items, fixtures, tool health). **Specifics not yet captured — do not start
+guessing.** Open the requirements with the same F0-style pass that worked for
+Phase F.
+
+### G3. Architecture tab in Maskinrummet ☐
+
+- ☐ New tab beside Kredsløb / Graflinse / Tankestrøm showing the **whole solution**:
+  LLM, Python backend, React frontend, Neo4j, and the GCP components
+  (Cloud Run, Firestore `mr_runs`/`mr_feedback`, GCS `…-eval-history`,
+  Secret Manager, Artifact Registry).
+- ⚠ **Design tension to resolve first:** this project's stated rule is that
+  Kredsløbet *"genereres fra runtime … og kan aldrig"* go stale (App.tsx:205), and
+  the redesign doc opens by calling out exactly this failure — the old views were
+  "factually stale — hardcoded '13 tools', 'Gemini 2.5 Flash'". A hand-drawn
+  architecture diagram is precisely that failure mode reintroduced. **Recommendation:**
+  static topology (boxes/edges) may be hand-drawn, but every *label that can drift*
+  — model id, tool count, provider, graph stats, revision — must bind to
+  `/api/architecture` rather than be typed into the SVG.
+- ☐ Decide whether the GCP layer is discovered or declared. Declared is fine if
+  the drift-prone labels follow the rule above.
+- Not agent-visible (UI only) → no matched pair (ground rule 6); verify like
+  E1–E4: Playwright + real-data eyeball.
+
+---
+
 ## E4 — Eval lens v2 ☑ DONE 2026-08-08 (Opus) — **A1 landed with it**
 
 Shipped: `GET /api/eval/golden` (full set + facets + search + tag filtering),
@@ -270,6 +347,8 @@ Scope decisions to respect:
   gitignore or archive the rest.
 - 🔒 **Newer models now listed**: `gemini-3.6-flash`, `gemini-3-pro-preview`. Switching
   is a **substrate change** — matched pair required, not a config edit.
+  → User approved a **full 3.6-flash run** 2026-08-12 (**G1**). Approval covers the
+  run; switching the default substrate still needs the pair.
 
 ---
 
@@ -295,7 +374,7 @@ Scope decisions to respect:
 
 | Item | Gate |
 |---|---|
-| GCP Cloud Run deployment | **Delegated to Gemini 2026-08-09** — handover prompt: `whitepapers/gcp_persistence_handover.md`. Verified live: `/api/eval/runs` returns `[]` because run files are gitignored (so absent from the image) AND Cloud Run's filesystem is ephemeral (mr_runs + smoke records vanish on restart); `APP_MODE=user` also hides the Eval tab entirely. Live config has drifted (2.5-flash / 11 tools vs 3.5-flash / 12 local) — **the deployed agent is not the substrate the evals measure.** |
+| GCP Cloud Run deployment | **Delegated to Gemini 2026-08-09** — handover prompt: `whitepapers/gcp_persistence_handover.md`. ⚠ **Partly superseded 2026-08-12 (see Phase G):** persistence landed in `54fb7af`/`58fd7e7`, so the ephemeral-filesystem and empty-`/api/eval/runs` findings no longer hold — mr_runs/mr_feedback go to Firestore and eval artefacts read from GCS. Still true: `APP_MODE=user` hides the Eval tab, only smoke runs are in the bucket, and live config has drifted (2.5-flash / 11 tools vs 3.5-flash / 12 local) — **the deployed agent is not the substrate the evals measure.** |
 | Concept layer (indkomstkategori spine) | Asserts tax doctrine — user must expert-review seed edges; build as on-demand tool only |
 | Qwen3-30B model swap | Postponed; C4 (its blocker) is now concluded |
 | Flash-3.5 control/treatment runs | User schedules; costs API money |
