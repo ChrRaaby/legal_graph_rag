@@ -46,7 +46,8 @@ os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 sys.path.insert(0, str(Path(__file__).parent))
 import app as agent_app  # noqa: E402  (triggers one import-time build_runtime)
 from app import (  # noqa: E402
-    build_runtime, stream_agent_answer, resolve_llm_provider, redact_if_pii,
+    build_runtime, stream_agent_answer, resolve_llm_provider, resolve_run_model,
+    redact_if_pii,
     token_usage, cost_dkk, PRICE_USD_PER_MTOK, USD_TO_DKK, EVAL_HISTORY_DIR,
 )
 
@@ -102,7 +103,9 @@ def _acquire_runtime():
 print("Maskinrummet server — acquiring agent runtime…", flush=True)
 ANALYSIS, AGENT_EXECUTOR, AGENT_TOOLS = _acquire_runtime()
 PROVIDER = resolve_llm_provider()
-print(f"Runtime ready · provider={PROVIDER} · {len(AGENT_TOOLS)} tools · app_mode={APP_MODE}", flush=True)
+RUN_MODEL = resolve_run_model()   # concrete model, for stamping smoke records
+print(f"Runtime ready · provider={PROVIDER} · model={RUN_MODEL} · {len(AGENT_TOOLS)} tools "
+      f"· app_mode={APP_MODE}", flush=True)
 
 
 # ── Cached runtime-truth facts ────────────────────────────────────────────────
@@ -1203,6 +1206,10 @@ def _append_smoke_record(item: dict, answer: str, latency: float, scores: dict,
         "run_idx": 1,
         "git_sha": _git_sha(),
         "provider": PROVIDER,
+        # Same concrete-model stamp eval_run.py writes — without it a UI smoke on
+        # Ollama records only the bare provider and lands in the picker as
+        # "ollama · ukendt model", which is the defect this pair of stamps fixes.
+        "model": RUN_MODEL,
         "set_version": str(_load_golden().get("metadata", {}).get("version", "")),
         "usage": token_usage(tool_events),
         "run_id": run_id,          # only smoke records have this → replayable
