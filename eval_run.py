@@ -69,7 +69,10 @@ logging.getLogger("huggingface_hub").setLevel(logging.ERROR)
 os.environ.setdefault("HF_HUB_DISABLE_IMPLICIT_TOKEN", "1")
 
 sys.path.insert(0, str(Path(__file__).parent))
-from app import build_runtime, stream_agent_answer, log_trajectory, resolve_llm_provider  # noqa: E402
+from app import (  # noqa: E402
+    build_runtime, stream_agent_answer, log_trajectory,
+    resolve_llm_provider, resolve_run_model,
+)
 # A1 (2026-08-08): scoring is single-sourced in app.py. These were defined here
 # and are now imported, so eval_run, server.py's Eval lens and the legacy
 # Streamlit panel all score identically. Re-exported at module level because
@@ -618,6 +621,13 @@ def main() -> None:
     # Same resolution build_runtime() applies internally (provider=None default) —
     # computed here too so every output record can be stamped with it.
     run_provider = resolve_llm_provider()
+    # `provider` alone loses the model on Ollama: gemini resolves to
+    # "gemini:<model>" but local runs resolve to the bare string "ollama", so
+    # every local run in eval_history/ is stamped identically and the actual
+    # model is unrecoverable afterwards. Stamp the concrete model alongside it.
+    # Additive on purpose — resolve_llm_provider()'s return value is compared
+    # against fixed sets in build_runtime(), so it must not change shape.
+    run_model = resolve_run_model(run_provider)
 
     judge_llm = None
     if args.judge or args.scorer == "judge":
@@ -659,6 +669,7 @@ def main() -> None:
             "item": item, "answer": answer, "latency_s": latency,
             "scores": scores, "run_idx": _run_state["idx"],
             "git_sha": run_git_sha, "provider": run_provider,
+            "model": run_model,
             "set_version": run_set_version,
             # Tokens + cost per item (2026-08-08). Previously an eval record said
             # what an item scored but never what it COST — so the price of a run

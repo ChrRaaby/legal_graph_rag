@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from "react";
 import {
   fetchEvalRuns, fetchEvalItems, fetchToolHealth, fetchGolden, streamEvalRun,
-  fetchScopeFixtures,
+  fetchScopeFixtures, fetchArchitecture,
   type EvalRun, type EvalItem, type ToolHealthRow,
   type GoldenSet, type GoldenItem, type EvalRunVerdict, type ScopeFixture,
   type Usage,
@@ -27,8 +27,78 @@ function UsageBits({ usage }: { usage?: Usage | null }) {
 const pct = (r: { pass: number; total: number }) => (r.total ? Math.round((100 * r.pass) / r.total) : 0);
 const shortDate = (ts: string) => (ts || "").slice(0, 10);
 
-function runLabel(r: EvalRun): string {
-  return `${r.model} · ${r.set_version} · ${r.repeat}× · ${r.mean_pass}/${r.n_items} · ${shortDate(r.ts)}`;
+/** Below this many items a run is a smoke or debug stub, not a measurement.
+ *  They shared one flat list with the real runs, so a 1/1 run read as a peer of
+ *  a 69-item run — and the denominators (/69 /50 /30 /13 /1) made "36/69" and
+ *  "36/50" look equal at a glance. Stubs are grouped away and scores shown as %. */
+const STUB_MAX_ITEMS = 15;
+/** Below this many observations a pass-% is noise. Damped and labelled, never
+ *  hidden — same principle as null-over-fake-zero for usage. */
+const THIN_N = 10;
+
+const isStub = (r: EvalRun) => r.n_items < STUB_MAX_ITEMS;
+
+/** Model lives in the optgroup, so the option itself carries only what varies. */
+const runOptionLabel = (r: EvalRun) =>
+  `${shortDate(r.ts)} · ${r.set_version} · ${r.repeat}× · ${r.pass_pct}%`;
+
+/** Grouped, filterable run picker. Was a flat 48-entry <select> whose labels
+ *  had to be decoded to tell six near-identical local runs apart. */
+function RunPicker({ label, value, onChange, runs, allowNone }: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  runs: EvalRun[];
+  allowNone?: boolean;
+}) {
+  const [q, setQ] = useState("");
+  const needle = q.trim().toLowerCase();
+  const shown = useMemo(() => {
+    const hit = (r: EvalRun) =>
+      !needle ||
+      `${r.model} ${r.set_version} ${shortDate(r.ts)} ${r.name}`.toLowerCase().includes(needle);
+    const list = runs.filter(hit);
+    // The selected run must stay selectable even when filtered out, or typing
+    // silently reassigns the selection to whatever lands first.
+    const sel = runs.find((r) => r.name === value);
+    return sel && !list.includes(sel) ? [sel, ...list] : list;
+  }, [runs, needle, value]);
+
+  const byModel = new Map<string, EvalRun[]>();
+  shown.filter((r) => !isStub(r)).forEach((r) => {
+    const k = r.model || "ukendt";
+    if (!byModel.has(k)) byModel.set(k, []);
+    byModel.get(k)!.push(r);
+  });
+  const stubs = shown.filter(isStub);
+
+  return (
+    <label className="runpick">
+      {label}
+      <input
+        className="runfilter"
+        value={q}
+        onChange={(e) => setQ(e.target.value)}
+        placeholder="filtrér: model, sætversion, dato …"
+        aria-label={`Filtrér ${label}`}
+      />
+      <select value={value} onChange={(e) => onChange(e.target.value)}>
+        {allowNone && <option value="">— ingen —</option>}
+        {[...byModel.entries()].map(([model, rs]) => (
+          <optgroup key={model} label={model}>
+            {rs.map((r) => <option key={r.name} value={r.name}>{runOptionLabel(r)}</option>)}
+          </optgroup>
+        ))}
+        {stubs.length > 0 && (
+          <optgroup label={`Smoke & debug · under ${STUB_MAX_ITEMS} items`}>
+            {stubs.map((r) => (
+              <option key={r.name} value={r.name}>{runOptionLabel(r)} · {r.n_items} items</option>
+            ))}
+          </optgroup>
+        )}
+      </select>
+    </label>
+  );
 }
 
 type DimField = "category" | "difficulty" | "behavior" | "pillar" | "tags";
@@ -42,47 +112,81 @@ function DimTable({ title, field, primary, compare, note }: {
   note?: string;
 }) {
   const rowsOf = (run: EvalRun | null) => (run?.dims?.[field] ?? []);
-  const values = useMemo(() => {
-    const set = new Set<string>();
-    rowsOf(primary).forEach((r) => set.add(r.value));
-    rowsOf(compare).forEach((r) => set.add(r.value));
-    return [...set].sort();
+
+  // Rows were sorted alphabetically, which buried a 43-point gap among forty
+  // n=5 tag rows. Rank by the size of the difference instead, and fall back to
+  // sample size when there is nothing to compare against.
+  const rows = useMemo(() => {
+    const values = new Set<string>();
+    rowsOf(primary).forEach((r) => values.add(r.value));
+    rowsOf(compare).forEach((r) => values.add(r.value));
+    const built = [...values].map((value) => {
+      const prow = rowsOf(primary).find((r) => r.value === value) ?? null;
+      const crow = rowsOf(compare).find((r) => r.value === value) ?? null;
+      const gap = prow && crow ? pct(crow) - pct(prow) : null;
+      const n = Math.max(prow?.total ?? 0, crow?.total ?? 0);
+      return { value, prow, crow, gap, n, thin: n < THIN_N };
+    });
+    built.sort((a, b) => {
+      // thin rows always last: a 0% at n=5 is not a finding
+      if (a.thin !== b.thin) return a.thin ? 1 : -1;
+      if (compare) {
+        const ga = a.gap == null ? -1 : Math.abs(a.gap);
+        const gb = b.gap == null ? -1 : Math.abs(b.gap);
+        if (ga !== gb) return gb - ga;
+      }
+      if (a.n !== b.n) return b.n - a.n;
+      return a.value.localeCompare(b.value, "da");
+    });
+    return built;
   }, [primary, compare, field]);
-  const cell = (run: EvalRun | null, v: string) => {
-    const row = rowsOf(run).find((r) => r.value === v);
-    return row ? `${pct(row)}%` : "—";
-  };
-  if (values.length === 0) return null;
+
+  const modelHead = (r: EvalRun) => r.model.replace("gemini-", "").replace("gemma4:", "");
+  if (rows.length === 0) return null;
+  const anyThin = rows.some((r) => r.thin);
   return (
     <div className="dimtable">
-      <h5>{title}</h5>
+      <h5>{title}{compare && <span className="det"> · sorteret efter største forskel</span>}</h5>
       {note && <div className="note">{note}</div>}
       <div style={{ overflowX: "auto" }}>
         <table className="etbl">
           <thead>
             <tr>
               <th>Dimension</th>
-              <th className="num">{primary.model.replace("gemini-", "").replace("gemma4:", "")}</th>
-              {compare && <th className="num">{compare.model.replace("gemini-", "").replace("gemma4:", "")}</th>}
+              <th className="num">{modelHead(primary)}</th>
+              {compare && <th className="num">{modelHead(compare)}</th>}
+              {compare && <th className="num">forskel</th>}
               <th className="num">items</th>
             </tr>
           </thead>
           <tbody>
-            {values.map((v) => {
-              const prow = rowsOf(primary).find((r) => r.value === v);
-              const worst = prow && pct(prow) < 50;
-              return (
-                <tr key={v} className={worst ? "worst" : ""}>
-                  <td>{v}</td>
-                  <td className="num">{cell(primary, v)}</td>
-                  {compare && <td className="num">{cell(compare, v)}</td>}
-                  <td className="num">{prow?.total ?? "—"}</td>
-                </tr>
-              );
-            })}
+            {rows.map(({ value, prow, crow, gap, n, thin }) => (
+              // `worst` is suppressed on thin rows — flagging a 0% at n=5 red
+              // gives noise the same visual weight as a real regression.
+              <tr key={value} className={[thin ? "thin" : "", !thin && prow && pct(prow) < 50 ? "worst" : ""].filter(Boolean).join(" ")}>
+                <td>
+                  {value}
+                  {thin && <span className="nwarn" title={`Kun ${n} observationer — for få til at læse som resultat`}>n={n}</span>}
+                </td>
+                <td className="num">{prow ? `${pct(prow)}%` : "—"}</td>
+                {compare && <td className="num">{crow ? `${pct(crow)}%` : "—"}</td>}
+                {compare && (
+                  <td className={`num ${gap == null || thin ? "" : gap > 0 ? "gap-pos" : gap < 0 ? "gap-neg" : ""}`}>
+                    {gap == null ? "—" : gap > 0 ? `+${gap}` : `${gap}`}
+                  </td>
+                )}
+                <td className="num">{n || "—"}</td>
+              </tr>
+            ))}
           </tbody>
         </table>
       </div>
+      {anyThin && (
+        <div className="note">
+          Rækker med under {THIN_N} observationer er dæmpet og mærket <b>n=</b> — de er for tynde
+          til at læse som resultater.
+        </div>
+      )}
     </div>
   );
 }
@@ -414,30 +518,62 @@ function ScopeFixtures() {
 function ToolHealth() {
   const [rows, setRows] = useState<ToolHealthRow[] | null>(null);
   const [nRuns, setNRuns] = useState(0);
+  const [allTools, setAllTools] = useState<string[] | null>(null);
   useEffect(() => {
     fetchToolHealth().then((d) => { setRows(d.tools); setNRuns(d.n_runs); }).catch(() => setRows([]));
+    // Runtime tool list, so "never called" is measured against what the agent
+    // actually has — not a hardcoded count that would go stale.
+    fetchArchitecture().then((a) => setAllTools(a.tools.map((t) => t.name))).catch(() => setAllTools(null));
   }, []);
   if (!rows) return null;
+
+  const total = rows.reduce((s, t) => s + t.calls, 0);
+  const called = new Set(rows.map((t) => t.tool));
+  const never = (allTools ?? []).filter((t) => !called.has(t));
+
   return (
     <div className="dimtable">
-      <h5>Værktøjs-sundhed · {nRuns} live-kørsler</h5>
+      <h5>
+        Værktøjs-sundhed
+        <span className="det"> · {nRuns} live-kørsler · {fmtTok(total)} kald
+          {allTools && ` · ${never.length} af ${allTools.length} værktøjer aldrig kaldt`}</span>
+      </h5>
+      <div className="note">
+        Kilden er <b>live-samtaler</b>, ikke eval-kørsler, og tallene er <b>ikke</b> delt op
+        på substrat. Læs det som et udgangspunkt for en optælling — ikke som optællingen.
+      </div>
       {rows.length === 0 ? (
         <div className="note">Ingen live-kørsler endnu — stil spørgsmål i chatten, så udfyldes tabellen.</div>
       ) : (
         <div style={{ overflowX: "auto" }}>
           <table className="etbl">
             <thead>
-              <tr><th>Værktøj</th><th className="num">kald</th><th className="num">tomme svar</th><th className="num">middel-tid</th></tr>
+              <tr>
+                <th>Værktøj</th><th className="num">kald</th><th className="num">andel</th>
+                <th className="num">tomme svar</th><th className="num">middel-tid</th>
+              </tr>
             </thead>
             <tbody>
-              {rows.map((t) => (
-                <tr key={t.tool} className={t.empty_rate >= 50 ? "worst" : ""}>
-                  <td>{t.tool}</td>
-                  <td className="num">{t.calls}</td>
-                  <td className="num">{t.empty_rate}%</td>
-                  <td className="num">{t.mean_duration_s == null ? "—" : `${t.mean_duration_s.toFixed(2).replace(".", ",")}s`}</td>
+              {rows.map((t) => {
+                const thin = t.calls < THIN_N;
+                return (
+                  <tr key={t.tool} className={[thin ? "thin" : "", !thin && t.empty_rate >= 50 ? "worst" : ""].filter(Boolean).join(" ")}>
+                    <td>
+                      {t.tool}
+                      {thin && <span className="nwarn" title={`Kun ${t.calls} kald — for få til at læse som en rate`}>n={t.calls}</span>}
+                    </td>
+                    <td className="num">{t.calls}</td>
+                    <td className="num">{total ? Math.round((100 * t.calls) / total) : 0}%</td>
+                    <td className="num">{t.empty_rate}%</td>
+                    <td className="num">{t.mean_duration_s == null ? "—" : `${t.mean_duration_s.toFixed(2).replace(".", ",")}s`}</td>
+                  </tr>
+                );
+              })}
+              {never.length > 0 && (
+                <tr className="worst">
+                  <td colSpan={5}>Aldrig kaldt: {never.join(" · ")}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </div>
@@ -493,10 +629,14 @@ export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) 
     fetchEvalRuns()
       .then((rs) => {
         setRuns(rs);
-        const v4 = rs.find((r) => r.name.includes("v4_flash_5x")) ?? rs[0];
-        if (v4) setPrimaryName(v4.name);
-        const g = rs.find((r) => r.model.includes("gemma") && r.set_version.includes("4"));
-        if (g) setCompareName(g.name);
+        // Was: pin to eval_results_v4_flash_5x.jsonl, plus the first gemma v4 as
+        // the comparison — index 32 and 28 of 48, both from 2026-07-05. Historik
+        // therefore opened on a five-week-old pair with nothing saying so.
+        // The server returns ts-descending, so the newest real run is the head.
+        const newest = rs.find((r) => !isStub(r)) ?? rs[0];
+        if (newest) setPrimaryName(newest.name);
+        // No default comparison: auto-picking a counterpart is what produced a
+        // silent cross-substrate, cross-set-version pair in the first place.
       })
       .catch((e) => setError(String(e)));
   }, []);
@@ -533,9 +673,12 @@ export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) 
     return (
       <div className="eval">
         {subtabs}
-        <GoldenBrowser onRun={runSmoke} running={running} onLoaded={setGolden} />
+        {/* The runner renders BEFORE the browser. GoldenBrowser contains the
+            whole 69-row table, so with the old order the live run card was
+            always below it — off-screen exactly while it was worth watching. */}
         <RunnerPanel progress={progress} verdicts={verdicts} error={runErr}
                      onInspectRun={onInspectRun} />
+        <GoldenBrowser onRun={runSmoke} running={running} onLoaded={setGolden} />
       </div>
     );
   }
@@ -553,26 +696,35 @@ export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) 
     <div className="eval">
       {subtabs}
       <div className="eval-selects">
-        <label>Kørsel
-          <select value={primaryName} onChange={(e) => setPrimaryName(e.target.value)}>
-            {runs.map((r) => <option key={r.name} value={r.name}>{runLabel(r)}</option>)}
-          </select>
-        </label>
-        <label>Sammenlign
-          <select value={compareName} onChange={(e) => setCompareName(e.target.value)}>
-            <option value="">— ingen —</option>
-            {runs.map((r) => <option key={r.name} value={r.name}>{runLabel(r)}</option>)}
-          </select>
-        </label>
+        <RunPicker label="Kørsel" value={primaryName} onChange={setPrimaryName} runs={runs} />
+        <RunPicker label="Sammenlign" value={compareName} onChange={setCompareName} runs={runs} allowNone />
       </div>
+      {primary && compare && primary.set_version !== compare.set_version && (
+        <div className="note bad">
+          ⚠ Forskellige sætversioner ({primary.set_version} mod {compare.set_version}) — items
+          er ikke de samme, så tallene kan ikke sammenlignes direkte.
+        </div>
+      )}
+      {primary && isStub(primary) && (
+        <div className="note">
+          Denne kørsel har kun {primary.n_items} items — en smoke- eller debug-kørsel, ikke en måling.
+        </div>
+      )}
 
       {primary && (
         <>
           <div className="tiles">
-            <div className="tile"><div className="v">{primary.mean_pass}<span className="sub">/{primary.n_items}</span></div><div className="k">{primary.model} · det.</div></div>
-            <div className="tile"><div className="v">{primary.pass_pct}%</div><div className="k">beståelse</div></div>
+            {/* Headline is the percentage: the raw score's denominator varies
+                across eras (/69 /50 /30 /13), so "34,2" alone is unreadable. */}
+            <div className="tile">
+              <div className="v">{primary.pass_pct}%</div>
+              <div className="k">beståelse · {primary.mean_pass}/{primary.n_items}</div>
+            </div>
+            <div className="tile"><div className="v">{primary.model}</div><div className="k">substrat · det.</div></div>
             <div className="tile"><div className="v">{primary.repeat}×</div><div className="k">kørsler · {primary.set_version}</div></div>
-            <div className="tile"><div className="v mono">{primary.git_sha}</div><div className="k">app-commit · {shortDate(primary.ts)}</div></div>
+            {primary.git_sha !== "—" && (
+              <div className="tile"><div className="v mono">{primary.git_sha}</div><div className="k">app-commit · {shortDate(primary.ts)}</div></div>
+            )}
             {primary.gated != null && primary.gated > 0 && (
               <div className="tile"><div className="v">🛡 {primary.gated}</div><div className="k">besvaret af skjoldet</div></div>
             )}
@@ -597,13 +749,16 @@ export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) 
                   </div>
                 </div>
               </>
-            ) : (
-              <div className="tile">
-                <div className="v sub">—</div>
-                <div className="k">forbrug ikke registreret i denne fil</div>
-              </div>
-            )}
+            ) : null /* pre-2026-08-08 files record no usage; collapse rather
+                        than hold prime space with an em dash */}
           </div>
+          {!primary.usage && (
+            <div className="note">Forbrug er ikke registreret i denne fil (skrevet før 2026-08-08).</div>
+          )}
+
+          {/* Promoted above the matrices: with G4 open, which tools the agent
+              actually reaches for is the most decision-relevant table here. */}
+          <ToolHealth />
 
           <DimTable title="Kategori" field="category" primary={primary} compare={compare} />
           <DimTable title="Adfærd" field="behavior" primary={primary} compare={compare} />
@@ -624,7 +779,6 @@ export default function Eval({ onInspectRun }: { onInspectRun?: (runId: string) 
           </div>
 
           <ScopeFixtures />
-          <ToolHealth />
         </>
       )}
     </div>

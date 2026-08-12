@@ -758,8 +758,16 @@ def trace(run_id: str):
 # ── E3: eval lens + tool health ───────────────────────────────────────────────
 
 def _infer_model(name: str, sample: dict) -> str:
-    if sample.get("provider"):
-        return sample["provider"]
+    # `model` is the concrete model, stamped since 2026-08-12. `provider` is the
+    # older stamp and is only self-describing for gemini ("gemini:<model>") —
+    # local runs recorded a bare "ollama", which is why every pre-2026-08-12
+    # gemma run looks identical in the picker. Fall back to the filename, and
+    # say "ukendt model" rather than inventing one.
+    if sample.get("model"):
+        return sample["model"]
+    provider = sample.get("provider") or ""
+    if ":" in provider:
+        return provider.split(":", 1)[1]
     n = name.lower()
     if "flash" in n:
         return "gemini-2.5-flash"
@@ -768,7 +776,9 @@ def _infer_model(name: str, sample: dict) -> str:
             return model
     if "gemma" in n:
         return "gemma4:26b"
-    return "ukendt"
+    if provider == "ollama":
+        return "ollama · ukendt model"
+    return provider or "ukendt"
 
 
 def _infer_set(name: str, sample: dict) -> str:

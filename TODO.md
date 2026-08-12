@@ -146,12 +146,44 @@ should face a fresh usage census.
   side by side in Historik; the run tile must make model + provider unmissable or
   the comparison silently misleads. Result files already carry the stamp.
 
-### G2. Eval UI rework ⏳ — **design doc written 2026-08-12, awaiting user go**
+### G2. Eval UI rework — **G2a ☑ DONE 2026-08-12 · G2b ☐ open**
 
 **Design:** `whitepapers/eval_workspace_design.md` · **mockup:**
 `whitepapers/mockups/eval_workspace_mockup.html` (the mockup is the V1 contract,
-same convention as Phase E). Phasing: **G2a** = content fixes inside `Eval.tsx`
-(ships alone, kills the misleading defaults); **G2b** = the workspace split.
+same convention as Phase E). **G2b** (the workspace split) is unstarted.
+
+☑ **G2a shipped** — findings 1–6 and 9 below, verified against the running app:
+- Historik now opens on the **newest real run** (was index 32 of 48). ⚠ The
+  literal newest run is a **1-item smoke**, so "default to newest" alone would
+  have replaced one bad default with another — the stub filter is load-bearing,
+  not cosmetic. No default comparison any more: auto-pairing is what produced
+  the silent cross-substrate pair.
+- Scores shown as **%**; runs under 15 items grouped into "Smoke & debug"
+  (8 of 48); explicit warning when the two selected runs are different set
+  versions.
+- Pickers **grouped by model** with a filter box.
+- **Model label fixed at the source.** `resolve_llm_provider()` returns
+  `gemini:<model>` but a bare `"ollama"` — the local model lived only in
+  `OLLAMA_MODEL` and never reached the record, so every local run was stamped
+  identically. Added `resolve_run_model()` (app.py, additive — the provider
+  string's shape is matched against fixed sets in `build_runtime`, so it must
+  not change) and `eval_run.py` now stamps `model`. **Without this, G1's gemma
+  run would have inherited the same defect.** Historical files fall back to the
+  filename and otherwise say `ollama · ukendt model` rather than inventing one.
+- Dimension tables gained a **forskel** column, sort by gap size instead of
+  A–Z, and damp+label rows under n=10 (`worst` red is suppressed on thin rows —
+  a 0 % at n=5 was getting the same visual weight as a real regression).
+- **Tool health promoted** above the matrices, with call share and
+  never-called tools derived from `/api/architecture` (runtime truth, so the
+  count cannot go stale). It states its own provenance: live chat runs, not
+  eval, and not per-substrate.
+- Dead stat tiles collapse; the usage caveat moves to a note.
+- `<RunnerPanel>` now renders **before** `<GoldenBrowser>` (finding 9).
+
+Verified: `tsc` + vite build clean, 30 replay assertions pass, no console
+errors, API and DOM checked live. **Not verified live: the smoke-run card
+itself** — RunnerPanel renders null when idle and a real run costs API money,
+so its new position is guaranteed by source order only.
 
 Current shape is E4's: Eval tab split into *Testsuite* (browse + smoke runner) and
 *Historik* (past runs, matrix, items, fixtures, tool health).

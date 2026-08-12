@@ -281,6 +281,17 @@ footer{font-size:11px;color:var(--ink-3);text-align:center;padding-top:2px}
 .etbl td{padding:5px 8px;border-bottom:1px solid var(--line);color:var(--ink-2)}
 .etbl tr.worst td{color:var(--ink)}
 .etbl tr.worst td:first-child{color:var(--bad)}
+/* G2a: thin rows are damped and labelled, never dropped — a 0 % at n=5 is noise,
+   and giving it the same weight as a real gap is what made the tags wall unreadable. */
+.etbl tr.thin td{color:var(--ink-3)}
+.nwarn{font-size:9.5px;border:1px solid var(--line);border-radius:999px;padding:0 5px;margin-left:6px;color:var(--ink-3);font-variant-numeric:tabular-nums}
+.etbl td.gap-pos{color:var(--good)}
+.etbl td.gap-neg{color:var(--bad)}
+.eval-selects .runpick{max-width:340px}
+.runfilter{background:var(--panel-2);color:var(--ink);border:1px solid var(--line);border-radius:7px;padding:4px 8px;font:11.5px var(--sans);margin-bottom:3px}
+.runfilter::placeholder{color:var(--ink-3)}
+.dimtable h5 .det{font-size:10px;letter-spacing:.4px;text-transform:none;color:var(--ink-3);font-weight:400}
+.note.bad{color:var(--bad)}
 .etbl.items .item-row{cursor:pointer}
 .etbl.items .item-row:hover td{background:var(--accent-dim)}
 .etbl.items .item-row.always td:first-child{border-left:2px solid var(--good)}

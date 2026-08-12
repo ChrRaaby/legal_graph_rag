@@ -438,6 +438,28 @@ def resolve_llm_provider(provider: str | None = None) -> str | None:
     )
 
 
+def resolve_run_model(provider: str | None = None) -> str:
+    """The concrete model behind a resolved provider string, for run metadata.
+
+    `resolve_llm_provider` returns "gemini:<model>" but a bare "ollama" — the
+    local model lives in OLLAMA_MODEL and never reached the eval record, so
+    every local run in eval_history/ is stamped indistinguishably and the UI
+    can only say "ollama". This recovers it. Kept separate from
+    `resolve_llm_provider` because that function's return value is matched
+    against fixed sets in `build_runtime`; changing its shape would break
+    dispatch."""
+    p = resolve_llm_provider(provider)
+    if not p:
+        return "ukendt"
+    if p.startswith("gemini:"):
+        return p.split(":", 1)[1]
+    if p == "gemini":
+        return GEMINI_MODEL or "gemini"
+    if p == "ollama":
+        return OLLAMA_MODEL or "ollama"
+    return p
+
+
 @lru_cache(maxsize=None)
 def build_runtime(provider: str | None = None):
     if not (NEO4J_URI and NEO4J_USER and NEO4J_PASSWORD):
