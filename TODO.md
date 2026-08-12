@@ -146,11 +146,30 @@ should face a fresh usage census.
   side by side in Historik; the run tile must make model + provider unmissable or
   the comparison silently misleads. Result files already carry the stamp.
 
-### G2. Eval UI rework — **G2a ☑ DONE 2026-08-12 · G2b ☐ open**
+### G2. Eval UI rework ☑ DONE 2026-08-12 — **G2a and G2b both shipped**
 
 **Design:** `whitepapers/eval_workspace_design.md` · **mockup:**
 `whitepapers/mockups/eval_workspace_mockup.html` (the mockup is the V1 contract,
-same convention as Phase E). **G2b** (the workspace split) is unstarted.
+same convention as Phase E).
+
+☑ **G2b shipped — Eval is a workspace, not a lens.** Header switch
+`Samtale | Eval`; the lens rail is back to exactly the three surfaces that are
+functions of `(event_log, t)`; Eval renders full-window.
+- **Measured:** the Eval pane went from ~400 px to **1103 px** of a 1270 px
+  viewport — 2.75×. ⚠ `.app` is `min-height:100vh`, so bounding the shell
+  (`.app.ws-eval{height:100vh;overflow:hidden}`) was required — without it the
+  workspace just grew to content height and moved the nested scrollbar out to
+  the page, which is not the same thing as full height.
+- **The door works end-to-end:** Inspicér on an eval item loads the trace,
+  crosses to Samtale, lands on Kredsløb with the question, answer and timeline
+  populated. Verified against the 2026-08-12 smoke run.
+- **Mode gating settled: the Eval workspace is dev-only.** Leaving dev-tilstand
+  hides the switch and restores the split; re-entering dev lands on Samtale
+  rather than silently resuming a hidden workspace. Rationale: the runner spends
+  real API money and, with dev now the default on a public URL, only Basic Auth
+  is in front of it.
+
+Verified: `tsc` + vite build clean, 30 replay assertions pass, no console errors.
 
 ☑ **G2a shipped** — findings 1–6 and 9 below, verified against the running app:
 - Historik now opens on the **newest real run** (was index 32 of 48). ⚠ The

@@ -6,10 +6,13 @@ import type { RunClock } from "../lib/useRunClock";
 import Kredslob from "./Kredslob";
 import Graflinse from "./Graflinse";
 import Tankestrom from "./Tankestrom";
-import Eval from "./Eval";
 import Tidslinjen from "./Tidslinjen";
 
-export type TabId = "kredslob" | "graflinse" | "tanker" | "evalx";
+/** The rail holds only surfaces that are pure functions of `(event_log, t)` —
+ *  three projections of ONE samtale, which is why the Tidslinje scrubs them in
+ *  lockstep. Eval satisfied neither term (no event log, no clock) and was moved
+ *  out to its own workspace in G2b; see whitepapers/eval_workspace_design.md. */
+export type TabId = "kredslob" | "graflinse" | "tanker";
 
 interface Props {
   tools: ToolInfo[];
@@ -23,20 +26,16 @@ interface Props {
   onTab: (t: TabId) => void;
   selectedNodeId: string | null;
   onSelectNode: (id: string | null) => void;
-  /** Load a persisted eval run into the lenses (Eval → Kredsløbet). */
-  onInspectRun?: (runId: string) => void;
 }
 
 const LABELS: Record<TabId, string> = {
   kredslob: "Kredsløb",
   graflinse: "Graflinse",
   tanker: "Tankestrøm",
-  evalx: "Eval",
 };
 
 export default function Maskinrummet({
   tools, log, clock, question, provider, answer, runId, tab, onTab, selectedNodeId, onSelectNode,
-  onInspectRun,
 }: Props) {
   const caption = captionAt(log, clock.t, clock.live);
   const t = clock.t;
@@ -58,14 +57,14 @@ export default function Maskinrummet({
   }, [log, t, clock.live]);
 
   const counts: Record<TabId, string> = {
-    kredslob: "", graflinse: nGraf ? String(nGraf) : "", tanker: nTanker ? String(nTanker) : "", evalx: "",
+    kredslob: "", graflinse: nGraf ? String(nGraf) : "", tanker: nTanker ? String(nTanker) : "",
   };
 
   return (
     <section className="panel" aria-label="Maskinrummet">
       <div className="panel-h mr-h">
         <div className="tabs" role="tablist">
-          {(["kredslob", "graflinse", "tanker", "evalx"] as TabId[]).map((id) => (
+          {(["kredslob", "graflinse", "tanker"] as TabId[]).map((id) => (
             <button key={id} className="tab" role="tab" aria-selected={tab === id} onClick={() => onTab(id)}>
               {LABELS[id]}
               {counts[id] && <span className="n">{counts[id]}</span>}
@@ -84,9 +83,6 @@ export default function Maskinrummet({
         </div>
         <div className={`layer${tab === "tanker" ? " active" : ""}`} role="tabpanel">
           <Tankestrom log={log} t={t} live={clock.live} question={question} provider={provider} runId={runId} />
-        </div>
-        <div className={`layer${tab === "evalx" ? " active" : ""}`} role="tabpanel">
-          {tab === "evalx" && <Eval onInspectRun={onInspectRun} />}
         </div>
       </div>
 

@@ -8,8 +8,13 @@ import { useAgentRun } from "./lib/useAgentRun";
 import { useRunClock } from "./lib/useRunClock";
 import Chat from "./components/Chat";
 import Maskinrummet, { type TabId } from "./components/Maskinrummet";
+import Eval from "./components/Eval";
 
 type Theme = "auto" | "dark" | "light";
+/** Two scopes, not four lenses. `samtale` is one conversation — chat plus the
+ *  three lenses, all functions of (event_log, t). `eval` is the corpus and its
+ *  aggregate history, which has neither. See whitepapers/eval_workspace_design.md. */
+type Workspace = "samtale" | "eval";
 const nf = new Intl.NumberFormat("da-DK");
 
 export default function App() {
@@ -18,6 +23,7 @@ export default function App() {
   const [theme, setTheme] = useState<Theme>("auto");
   const [revealed, setRevealed] = useState(false);
   const [tab, setTab] = useState<TabId>("kredslob");
+  const [workspace, setWorkspace] = useState<Workspace>("samtale");
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [traces, setTraces] = useState<TraceSummary[]>([]);
 
@@ -38,6 +44,12 @@ export default function App() {
     if (theme === "auto") root.removeAttribute("data-theme");
     else root.setAttribute("data-theme", theme);
   }, [theme]);
+
+  // Leaving dev-tilstand leaves the Eval workspace with it, so flipping back to
+  // dev lands on Samtale rather than silently resuming a hidden workspace.
+  useEffect(() => {
+    if (arch && arch.app_mode !== "dev") setWorkspace("samtale");
+  }, [arch?.app_mode]);
 
   const cycleTheme = () =>
     setTheme((t) => (t === "auto" ? "dark" : t === "dark" ? "light" : "auto"));
@@ -65,12 +77,14 @@ export default function App() {
     fetchTrace(runId).then(run.loadTrace).catch(() => {});
   }, [run]);
 
-  /** Load an eval run into the lenses and jump to Kredsløbet — the same
-   *  inspection a real chat turn gets. Only smoke runs carry a run_id (their
-   *  events are persisted); CLI runs have no event log to replay. */
+  /** The one door between the workspaces: load an eval run into the lenses and
+   *  cross into Samtale, where it scrubs like any other turn. Eval selects and
+   *  aggregates; Samtale inspects a single trace. Only smoke runs carry a run_id
+   *  (their events are persisted); CLI runs have no event log to replay. */
   const inspectRun = useCallback((runId: string) => {
     loadHistory(runId);
     setTab("kredslob");
+    setWorkspace("samtale");
   }, [loadHistory]);
 
   if (archError) {
@@ -93,17 +107,34 @@ export default function App() {
 
   const isDev = arch.app_mode === "dev";
   const showMaskinrum = isDev || revealed;
+  const showEval = isDev && workspace === "eval";
   const themeLabel = theme === "auto" ? "◑ auto" : theme === "dark" ? "☾ mørk" : "☀ lys";
   const question = [...run.messages].reverse().find((m) => m.role === "user")?.content ?? "";
   const answer = [...run.messages].reverse().find((m) => m.role === "assistant")?.content ?? "";
 
   return (
-    <div className="app">
+    <div className={`app${showEval ? " ws-eval" : ""}`}>
       <header>
         <div className="brand">
           <span className="par">§</span>Skattegraf
           {isDev && <small>MASKINRUMMET</small>}
         </div>
+        {/* Eval is dev-only: the runner behind it spends real API money, and
+            with the app defaulting to dev on a public URL only Basic Auth sits
+            in front. Flipping to user-tilstand returns to Samtale. */}
+        {isDev && (
+          <nav className="ws-switch" aria-label="Arbejdsrum">
+            {(["samtale", "eval"] as Workspace[]).map((w) => (
+              <button
+                key={w}
+                aria-current={workspace === w}
+                onClick={() => setWorkspace(w)}
+              >
+                {w === "samtale" ? "Samtale" : "Eval"}
+              </button>
+            ))}
+          </nav>
+        )}
         <div className="badges">
           {isDev && traces.length > 0 && (
             <select
@@ -176,6 +207,11 @@ export default function App() {
         </div>
       </header>
 
+      {showEval ? (
+        <section className="panel eval-workspace" aria-label="Eval">
+          <Eval onInspectRun={inspectRun} />
+        </section>
+      ) : (
       <div className={`split${showMaskinrum ? "" : " user"}`}>
         <Chat
           messages={run.messages}
@@ -201,10 +237,10 @@ export default function App() {
             onTab={setTab}
             selectedNodeId={selectedNodeId}
             onSelectNode={onSelectNode}
-            onInspectRun={inspectRun}
           />
         )}
       </div>
+      )}
 
       <footer>
         Maskinrummet — kredsløbet genereres fra runtime (værktøjsliste, LLM-udbyder) og kan aldrig

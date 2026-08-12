@@ -1,6 +1,7 @@
 # Eval-arbejdsrummet — Eval lens rework (design doc)
 
-**Status:** design proposed (Opus, 2026-08-12); implementation = **G2** in `TODO.md`, gated on user go.
+**Status:** ☑ **implemented 2026-08-12 (Opus) — G2a and G2b both shipped.** Design was proposed and approved the same day.
+**Resolved since writing:** the mode question below is settled — the Eval workspace is **dev-only**; leaving dev-tilstand returns to Samtale and re-entering lands on Samtale rather than silently resuming a hidden workspace.
 **Visual mockup:** `whitepapers/mockups/eval_workspace_mockup.html` — as with Phase E, **the mockup IS the V1 scope definition**; build what it shows, resist adding more.
 **Supersedes:** the Eval-lens portion of `frontend_maskinrummet_design.md` §"Feedback round 1" item 5 (the lens was pulled *into* the tab rail there; this doc pulls it back out, for the reason below).
 
