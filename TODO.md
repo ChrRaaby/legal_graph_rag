@@ -95,8 +95,9 @@ Deterministic half had already shown zero regression on never-gated items
 ## Phase G — live app: real eval runs, eval UI rework, architecture tab (NEW, user request 2026-08-12)
 
 **Goal:** the deployed service should show at least one *full* eval run (not just
-smoke), the Eval lens should be reworked, and Maskinrummet should gain an
-architecture tab covering the whole solution including its GCP substrate.
+smoke), the Eval lens should be reworked, Maskinrummet should gain an architecture
+tab covering the whole solution including its GCP substrate, and the tool set
+should face a fresh usage census.
 
 **State verified against the live service 2026-08-12** (project
 `gen-lang-client-0167283966`, service `legal-graph-rag`, europe-west1, revision
@@ -166,6 +167,41 @@ Phase F.
   the drift-prone labels follow the rule above.
 - Not agent-visible (UI only) → no matched pair (ground rule 6); verify like
   E1–E4: Playwright + real-data eyeball.
+
+### G4. Re-run the tool usage census ☐ (user 2026-08-12: "most of the tools are not being used")
+
+**There is a proven method for exactly this** — don't invent one. C3
+(backlog §194–196) ran a usage census across **2,301 saved eval item-runs** and
+cut **15 → 12** tools. Re-run it on the current 12.
+
+- ☐ **Census.** Every eval record carries `tool_sequence` (app.py:1952, 2158;
+  surfaced at server.py:1006 and in the lens's tool-health table), so this is a
+  read-only pass over `eval_history/` — no API spend to get the counts.
+  C3's decision rule stands: **0 calls ever → remove**; called-but-worse than the
+  retriever baseline → remove (`Semantic_Search` went at 23 % pass-when-called
+  vs 51 %).
+- ⚠ **Separate "unused" from "unusable" before deleting anything.** Two different
+  causes look identical in the counts: (a) the tool earns nothing, (b) the model
+  never *chooses* a tool that would help. **C1b is a live case of (b)** — the
+  citation tool is correct and flash simply never invokes it, and the recorded fix
+  is a deterministic post-answer step, *not* removal. A census that doesn't split
+  these will delete working capability. The user's framing — "figure out if there
+  is anything to gain by actually using them" — is exactly this question, so for
+  each 0-call tool decide explicitly: **force it and measure, or drop it.**
+- ⚠ **Census per substrate, not pooled.** C3's sharpest finding was that the
+  substrates disagree: flash never touched the pruned tools, while **gemma made
+  most of the 13 low-quality `Semantic_Search` calls**. A pooled count would have
+  hidden that.
+- **Synergy with G1:** the two full runs in G1 (3.6-flash + on-prem gemma) produce
+  exactly the fresh per-substrate `tool_sequence` data this census needs. Sequence
+  G1 → G4 and the census costs nothing extra.
+- ⚠ **Removal is agent-visible** (tool schemas change in every LLM request) →
+  matched pair required, both substrates, per ground rule 6. Note C3's gate came
+  back *flat* on flash and was kept on the §2 flat-clause (fewer schemas = fewer
+  tokens), not on a quality win — expect the same shape of argument here.
+- Reference: the 15 defined tools live at app.py:537–1446; three
+  (`Semantic_Search`, `Text2Cypher_Expert`, `Citation_Counts`) are already pruned
+  behind `C3_TOOL_PRUNE`, leaving the 12 in play.
 
 ---
 
