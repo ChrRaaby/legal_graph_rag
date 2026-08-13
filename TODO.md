@@ -114,7 +114,43 @@ should face a fresh usage census.
 - `migrate_to_gcp.py` migrates **only** `mr_runs` + `mr_feedback` to Firestore.
   It does **not** upload eval jsonl. Nothing in the repo does.
 
-### G1. Get a full eval run visible in the live app ☐
+### G1. Get a full eval run visible in the live app ⏳ — **gemma ☑ done & uploaded 2026-08-13, flash ⏳ partial**
+
+☑ **Run 2 — on-prem `gemma4:26b`, full 69/69, uploaded.**
+`eval_history/eval_results_g1_gemma26b_v42.jsonl` → **`gs://gen-lang-client-0167283966-eval-history/eval_history/`**
+(bucket listing verified). **49/69 = 71 % pass**, 759k in / 83k out tokens, 0,00 kr
+(local). Stamped `model: gemma4:26b` — the G2a stamp fix working end to end;
+before it, this run would have entered the picker as `ollama · ukendt model`
+alongside six indistinguishable siblings. Only 5 tools used, matching G4 exactly.
+⚠ **Do not read 71 % as an improvement** over the 48–64 % v4.2 gemma runs: F3
+measured 39–95 % divergence between reruns of the same cell, so this is inside
+known noise until a matched pair says otherwise.
+
+⏳ **Run 1 — `gemini-3.6-flash`** — partial, blocked by an infrastructure fault,
+not by the model. See the hang below.
+
+🔴 **Found: long Gemini runs hang indefinitely.** Reproduced repeatedly — the
+process parks at **0 % CPU, every thread in `futex_do_wait`, HTTPS socket to
+Google in `CLOSE-WAIT`**: the peer went away and nothing client-side ever times
+out. It struck after 64, 7, 13 and then every ~3 items.
+- `timeout=` + `max_retries=` on `ChatGoogleGenerativeAI` **did not fix it**
+  (committed anyway in `8c5ec33` — correct, just not sufficient; the transport
+  ignores it). `transport="rest"` is **not** a real parameter in this library
+  version — it silently lands in `model_kwargs`.
+- **Not quota and not the endpoint**: a direct call to the same model answers in
+  1,2 s while the agent run is parked. It is specific to the agent's large
+  multi-turn requests.
+- Mitigation: `scratchpad/g1_resilient_run.sh` — external watchdog that kills a
+  stalled round and resumes from the remaining ids, collecting parts and
+  stitching them at the end (needed because `eval_run.py:638` truncates its
+  `--output` at start). This is what got gemma to 69/69 in 4 rounds.
+- ☐ **Real fix still open.** Suspects: `include_thoughts=True`, or the size of
+  the tool-schema payload on this model.
+
+⚠ **Also note: none of today's UI work is deployed.** The live service still runs
+revision `legal-graph-rag-00012-mqf` from 2026-08-11. The uploaded run is visible
+to whatever the deployed revision can read; G2a/G2b/G3 are local-only until
+someone deploys. I did not deploy — out of scope for an unattended session.
 
 - ☐ **Upload path for eval artefacts.** One-shot `gcloud storage cp` is enough to
   unblock, but the repeatable fix is extending `migrate_to_gcp.py` (or the
@@ -264,7 +300,30 @@ three lenses are **pure functions of `(event_log, t)`** for one run. Eval has no
 event log and no `t`. **Eval is not a lens; it is a second workspace that was
 parked in the lens rail.** Design must follow that split — see G2-design below.
 
-### G3. Architecture tab in Maskinrummet ☐
+### G3. Architecture tab ☑ DONE 2026-08-12
+
+Shipped as a **third workspace** (`Samtale | Eval | Arkitektur`), not a fourth
+lens: G2b established that the rail holds only functions of `(event_log, t)`,
+and deployed topology has no clock — putting it in the rail would have
+reintroduced the category error G2b had just removed.
+
+- **Generated from `GET /api/system`**, per the dynamic decision. Layers:
+  klient · tjeneste · model · data · platform (GCP).
+- **8 of 11 nodes are observed** — resolved provider and model, loaded tool
+  count, live graph row counts, Python version, `app_mode`, whether Basic Auth
+  is configured, whether the Firestore/GCS clients came up, and
+  `K_SERVICE`/`K_REVISION` when on Cloud Run. The 3 the container genuinely
+  cannot see (Secret Manager, Artifact Registry, the browser) render **dashed
+  and labelled "erklæret"**, so a declared node cannot borrow a measured one's
+  authority.
+- ⚠ **It found something on its first run:** locally it reports Firestore and
+  Cloud Storage as **NEDE** — `google-cloud-firestore` / `google-cloud-storage`
+  are not installed in the local `.venv` (the two deps `requirements-server.txt`
+  gained in `23feaa9`). The local server silently falls back to sqlite and local
+  files. ☐ **User call:** installing them would also make local dev runs write
+  into the *live* bucket automatically, so it is left uninstalled for now.
+
+<details><summary>Original G3 scope</summary>
 
 - ☐ New tab beside Kredsløb / Graflinse / Tankestrøm showing the **whole solution**:
   LLM, Python backend, React frontend, Neo4j, and the GCP components
@@ -287,6 +346,8 @@ parked in the lens rail.** Design must follow that split — see G2-design below
   live revision can be observed rather than declared.
 - Not agent-visible (UI only) → no matched pair (ground rule 6); verify like
   E1–E4: Playwright + real-data eyeball.
+
+</details>
 
 ### G4. Re-run the tool usage census ☐ (user 2026-08-12: "most of the tools are not being used")
 
