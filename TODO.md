@@ -92,6 +92,42 @@ Deterministic half had already shown zero regression on never-gated items
 
 ---
 
+## Phase G ☑ CLOSED 2026-08-13 — summary
+
+All four items shipped. What a reader needs to know without going further:
+
+1. **Two full v4.2 runs exist and are in the live bucket** — `gemini-3.6-flash`
+   **65/69 (94 %)** and `gemma4:26b` **49/69 (71 %)**. Same night, same set, same
+   code. **Not a matched pair**, and F3 measured 39–95 % rerun divergence, so no
+   substrate conclusion may be drawn from the gap.
+2. **The tool census is substrate-dependent, and that is the finding.**
+   `Read_Only_Cypher` had *1 call in 3,865 records* and is **3.6-flash's top tool
+   (98 calls, 44 %)**. Treating a census as a removal list would have deleted the
+   new default agent's most-used tool. Only `Supersedes_Network_Explorer` and
+   `Superseded_By_Network_Explorer` are unused everywhere.
+3. **Eval is a workspace, not a lens** — the rail holds only functions of
+   `(event_log, t)`. Architecture became a third workspace for the same reason.
+4. **Three latent defects fixed on the way**, each of which had the UI reporting
+   something untrue: the model switcher relabelled without switching substrate;
+   local runs were stamped `ollama` with no model; Historik opened on a five-week-old
+   comparison.
+
+**Open, needing the user:**
+- ☐ **Price row for `gemini-3.6-flash`** (app.py ~1712). Absent → `cost_dkk: null`
+  on every record, so **all cost readouts are blank on the new default substrate**.
+  Needs real per-MTok figures; do not guess.
+- ☐ **Matched pair for the 3.6-flash substrate change** (🔒 gate below).
+- ☐ **Root-cause the Gemini `CLOSE-WAIT` hang** — mitigated by a watchdog, not fixed.
+- ☐ **Cloud Run secrets are inconsistent with the repo**: `LLM_PROVIDER` =
+  `gemini:gemini-3.5-flash` and `GEMINI_MODELS` omits both 3.5- and 3.6-flash, so
+  the deployed app does **not** run the substrate `.env` now names. Changing those
+  is a production config decision, deliberately left to the user.
+- ☐ **`google-cloud-firestore` / `google-cloud-storage` missing from the local
+  `.venv`** — local runs silently fall back to sqlite. Installing them also makes
+  local dev write into the live bucket, hence not done unilaterally.
+
+---
+
 ## Phase G — live app: real eval runs, eval UI rework, architecture tab (NEW, user request 2026-08-12)
 
 **Goal:** the deployed service should show at least one *full* eval run (not just

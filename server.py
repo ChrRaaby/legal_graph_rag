@@ -144,7 +144,15 @@ def _architecture() -> dict:
         # already drifted: it offered gemini-3.6-flash and gemini-3.5-flash-lite
         # (absent from GEMINI_MODELS, so silently ignored) and gemini-3.1-pro
         # (not a real model id at all — it is gemini-3.1-pro-preview).
-        "providers": ["ollama"] + [f"gemini:{m}" for m in GEMINI_MODELS],
+        # The active provider is included even when it is absent from
+        # GEMINI_MODELS — which is the live state on Cloud Run, where the
+        # LLM_PROVIDER secret names a model the GEMINI_MODELS secret omits.
+        # Without this the dropdown would not contain the substrate actually
+        # running, and would render blank next to a working agent.
+        "providers": sorted(
+            {PROVIDER, "ollama"} | {f"gemini:{m}" for m in GEMINI_MODELS},
+            key=lambda p: (p != PROVIDER, p),
+        ),
         "graph_stats": _graph_stats(),
         "tools": [{"name": t.name, "description": (t.description or "")} for t in AGENT_TOOLS],
         # Pricing is served from app.py's single table so the UI never carries
