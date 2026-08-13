@@ -29,6 +29,7 @@ STALL_SECS=${STALL_SECS:-420}     # no new record for this long -> assume hung
 STARTUP_GRACE=${STARTUP_GRACE:-900}
 MAX_ROUNDS=${MAX_ROUNDS:-12}
 
+RUN_ID=$(date -u +%H%M%S)
 mkdir -p "$PARTS_DIR"
 : > "$LOG"
 
@@ -61,7 +62,12 @@ for round in $(seq 1 "$MAX_ROUNDS"); do
     # Must keep the eval_history/ prefix: eval_artifact_path() basenames any
     # other relative form, which would silently drop the subdirectory and write
     # the part somewhere the watchdog is not looking.
-    PART="${PARTS_DIR}/part_${round}.jsonl"
+    #
+    # $RUN_ID in the name is not cosmetic: eval_run.py truncates its --output at
+    # start, so a second invocation whose round numbering restarts at 1 would
+    # reopen — and wipe — the parts the first invocation had already collected.
+    # That happened once and cost 11 records.
+    PART="${PARTS_DIR}/part_${RUN_ID}_${round}.jsonl"
     echo "== round $round · $COUNT item(s) left · $(date -u +%H:%M:%S) ==" >>"$LOG"
 
     PYTHONUNBUFFERED=1 .venv/bin/python3 eval_run.py \

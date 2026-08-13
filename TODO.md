@@ -126,8 +126,39 @@ alongside six indistinguishable siblings. Only 5 tools used, matching G4 exactly
 measured 39–95 % divergence between reruns of the same cell, so this is inside
 known noise until a matched pair says otherwise.
 
-⏳ **Run 1 — `gemini-3.6-flash`** — partial, blocked by an infrastructure fault,
-not by the model. See the hang below.
+☑ **Run 1 — `gemini-3.6-flash`, full 69/69, uploaded.**
+`eval_history/eval_results_g1_flash36_v42.jsonl` → same bucket (listing verified).
+**65/69 = 94 % pass**, 2,60 M in / 121 k out tokens. Took 7 watchdog rounds.
+⚠ **Cost is unrecorded**: `gemini-3.6-flash` has **no entry in the price table**
+(app.py ~1712), so all 69 records carry `cost_dkk: null` — honest "unknown", not a
+fake zero, but it means **every cost readout in the app is now blank on the new
+default substrate**. ☐ Add the price row once the real per-MTok figures are known;
+do not guess them.
+
+🔴 **G4's removal candidates are overturned by the new substrate — do not act on
+the old census.** `gemini-3.6-flash` uses the toolset in a completely different
+way:
+
+| tool | prior 3,865 records | 3.6-flash (69 records) |
+|---|---:|---:|
+| `Read_Only_Cypher` | **1 call, ever** | **98 calls — its top tool, 44 % share, 96 % pass-when-called** |
+| `Graph_Schema_Navigator` | 1 call, ever | 3 calls |
+
+Two tools that looked like dead weight are load-bearing on the substrate the app
+now defaults to. Had the census been treated as a removal list, this would have
+deleted the new agent's most-used tool. The per-substrate rule was not
+bureaucracy — it was the finding.
+
+Still unused **everywhere, including 3.6-flash**: `Supersedes_Network_Explorer`,
+`Superseded_By_Network_Explorer` (plus the already-pruned `Citation_Counts`,
+`Text2Cypher_Expert`). Those remain the only honest removal candidates, and still
+owe a matched pair.
+
+⚠ **94 % vs 71 % is one run each.** Same night, same set version, same code, which
+makes it a fairer comparison than anything in the history — but F3 measured
+39–95 % divergence between reruns of a single cell. **This is not the matched pair
+the 🔒 gate asks for**, and the substrate default was already moved on the user's
+instruction, not on this number.
 
 🔴 **Found: long Gemini runs hang indefinitely.** Reproduced repeatedly — the
 process parks at **0 % CPU, every thread in `futex_do_wait`, HTTPS socket to
@@ -421,6 +452,14 @@ candidates for investigation; it cannot on its own justify a removal.
 **Next step is a decision, not a deletion** — for each of the six absent tools:
 force the path and measure, or drop it. C1b is the precedent for the former.
 Removal is agent-visible → matched pair on both substrates first.
+
+🔴 **UPDATE 2026-08-13, after G1's runs landed (now 4,003 records):** the
+substrate-dependence warning above was not theoretical. On `gemini-3.6-flash`,
+**`Read_Only_Cypher` is the top tool — 98 calls, 44 % share** — against **1 call
+in the entire prior 3,865-record history**. `Graph_Schema_Navigator` likewise
+reappears. Acting on the earlier census would have removed the new default
+substrate's most-used tool. Only `Supersedes_Network_Explorer` and
+`Superseded_By_Network_Explorer` are still unused on **every** substrate.
 
 - ☐ **Census.** (superseded by the run above; re-run after G1 adds fresh
   per-substrate data.) Every eval record carries `tool_sequence` (app.py:1952, 2158;
